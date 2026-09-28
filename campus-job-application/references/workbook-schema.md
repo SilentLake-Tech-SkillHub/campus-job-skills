@@ -1,11 +1,10 @@
 # Workbook schema
 
-Read this reference before creating or updating role rows in `中国大陆及香港求职公司清单.xlsx`.
+Read this reference before creating or updating role rows in the workbook named in the job-search profile (`产品管理/求职配置.md`).
 
 ## Sheets
 
-- `中国大陆`: every source company whose original region is not `香港`.
-- `香港`: every source company whose original region is `香港`.
+- Regional role sheets: one per region listed in the job-search profile (for example `中国大陆` and `香港`), each holding the source companies of that region.
 - `分类说明`: preserve the source classification guidance and add only concise notes needed to explain role-row behavior.
 - `校招主链接`: reusable company-level index of verified official campus-recruitment landing pages. It is separate from the regional role tables and must not contain role-level JD, status, or application data.
 - `校招计划`: one row per verified company–plan, plus one blank-plan coverage row for each company not yet verified. It stores cross-plan application relationships separately from within-plan limits. This sheet does not replace the company master-link index or the role table.
@@ -25,7 +24,7 @@ Do not merge the regional sheets or create per-company sheets.
 - Store one current verified official campus-recruitment entry page per company. Use it as the first navigation source for future Open/filter work.
 - A `校招主链接` is a company-level landing, directory, or current-cycle campus page; it is never a direct role page and does not replace `岗位链接` in a role row.
 - Keep the visible cohort or cycle only when the official URL/page makes it clear. If the page is current but has no cohort label, leave `适用届别` blank rather than guessing.
-- Write a fully disclosed window as `YYYY年MM月DD日-YYYY年MM月DD日可投递`. If an official source provides a refresh date but no closing date, record the date and `截止日未披露`; do not derive a date from a previous cohort, a quota rule, or a third-party listing. For ByteDance 2027 standard campus recruitment, use `2026年08月03日-12月31日可投递（2次）；2027年01月01日刷新2次（截止日未披露）`.
+- Write a fully disclosed window as `YYYY年MM月DD日-YYYY年MM月DD日可投递`. If an official source provides a refresh date but no closing date, record the date and `截止日未披露`; do not derive a date from a previous cohort, a quota rule, or a third-party listing.
 - Refresh a stale master link in place after reporting the change. Do not create a duplicate company entry or populate any role fields in this index.
 
 ## Column order
@@ -91,9 +90,9 @@ The `校招计划` sheet begins with the user-specified columns:
 - `投递状态`: blank for company placeholders; `待投递` for every real role until a verified receipt exists; `已提交` only after verified success. `待投递` means recorded but unsubmitted, not selected by the user or approved for form filling.
 - `匹配度`: integer from 0 to 100, based on the complete JD, current user-confirmed résumé, verified project portfolio, and explicit user self-assessment. Leave blank when the required candidate material is unavailable. It is a relative prioritization score, not a hiring probability.
 - `匹配原因`: concise evidence-based explanation using `匹配：...；缺口：...`. Separate résumé-visible evidence from portfolio-only evidence when that difference could affect screening.
-- `校招冷静期`: verified official constraints on applications for the relevant campus-recruitment cycle, including a quota, cooling period, annual refresh date, or an immutable post-submission rule. Leave blank for company placeholders and where no official rule has been verified; blank never means unrestricted. Before filling or submitting, recheck the logged-in account's displayed remaining count. For ByteDance 2027 standard campus recruitment, use `2026-08-03至2026-12-31：2次；2027-01-01刷新2次（年度独立；已投递不可修改）`.
+- `校招冷静期`: verified official constraints on applications for the relevant campus-recruitment cycle, including a quota, cooling period, annual refresh date, or an immutable post-submission rule. Leave blank for company placeholders and where no official rule has been verified; blank never means unrestricted. Before filling or submitting, recheck the logged-in account's displayed remaining count. Reuse verified rules recorded in the job-search profile.
 
-Do not infer mastery from project labels or technology keywords. In particular, participation in data projects does not establish data-product, data-warehouse, or data-lake expertise when the user reports otherwise.
+Do not infer mastery from project labels or technology keywords. Follow the user's self-assessment recorded in the job-search profile when it conflicts with keyword evidence.
 
 ## Visual priority marking
 
@@ -105,7 +104,7 @@ Do not add extra status values without a user-approved schema change.
 ## Workbook safety
 
 - Before structural edits, record the source SHA-256 and make one recoverable backup.
-- Preserve all source companies and classification text. Expected baseline is 475 Mainland companies and 345 Hong Kong companies, 820 total.
+- Preserve all source companies and classification text. Check company counts against the expected baseline recorded in the job-search profile.
 - Use filters, freeze the header row, wrap JD cells, keep hyperlinks readable, and use a list validation for nonblank role statuses where supported.
 - On every edit, reload the latest workbook, update the smallest affected region, recalculate once, inspect key values and formula errors, render the changed sheet, export to the original workbook path, and verify the saved file.
 - Before a researched company is marked complete or its research window is closed, reopen the saved workbook and read back both the company's verified `校招主链接` row and every verified in-scope regional role row's direct `岗位链接` and JD. If no role was found, preserve the official plan/result-page and filter evidence for the zero-result conclusion. A missing direct link, unsaved row, inaccessible detail or unsearched plan keeps the affected scope pending.

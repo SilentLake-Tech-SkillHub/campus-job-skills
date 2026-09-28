@@ -5,7 +5,7 @@ description: Inventory current campus-recruitment plans for companies in the car
 
 # 校招计划初始化与刷新
 
-Use only in `<your-job-search-workspace>`, before `campus-job-application` opens or filters a company's roles. Read the workbook schema in `../campus-job-application/references/workbook-schema.md` before editing.
+Use only in a job-search workspace with a job-search profile (`产品管理/求职配置.md`), before `campus-job-application` opens or filters a company's roles. Read the workbook schema in `../campus-job-application/references/workbook-schema.md` before editing.
 
 ## One-time project initialization
 
@@ -13,7 +13,7 @@ Use only in `<your-job-search-workspace>`, before `campus-job-application` opens
 2. Check each company's current official campus entry for plans applicable to the user's target graduating class. A company may have multiple plans, business-unit programs, graduate tracks, and dual-eligible internship programs. Record only what the current source supports; do not treat a historical program as current.
 3. Replace a company's unexamined coverage entry with one row per verified plan. Retain a company-level coverage row if no plan can be verified, with `计划` blank and an explicit `盘点状态` such as `访问受阻` or `未发现当前计划`. Never turn a failed search into proof that the company has no plan.
 4. For every pair of current plans, research whether applications are independent, mutually exclusive, share a quota, or have another condition. Put the counterpart plan and relationship in `投递关系`. If current evidence is missing, write `与<计划>：待核实`. Keep within-plan application limits in `计划内投递限制`, separate from cross-plan relationships.
-5. Preserve source URL and date, report counts of unexamined, verified, unavailable, and relationship-unknown companies. A 820-company queue is not a completed 820-company research pass. Resume in batches without overwriting verified work.
+5. Preserve source URL and date, report counts of unexamined, verified, unavailable, and relationship-unknown companies. A queue of hundreds of unexamined companies is not a completed research pass. Resume in batches without overwriting verified work.
 
 ## Company lookup and refresh
 
