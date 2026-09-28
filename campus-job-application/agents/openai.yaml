@@ -1,0 +1,7 @@
+interface:
+  display_name: "校招职位刷新与投递"
+  short_description: "逐公司校招信息收集与双链接入表；选岗后再处理投递"
+  default_prompt: "使用 $campus-job-application 从工作簿下一家继续：核验并记录公司官方校招主链接、逐计划筛选正式产品岗、逐岗写入直达链接与 JD、读回 Excel；信息收集后关闭独立 Chrome 公司窗口，不填写或提交申请。"
+
+policy:
+  allow_implicit_invocation: true
