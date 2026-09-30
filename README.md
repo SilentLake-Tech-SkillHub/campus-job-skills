@@ -22,11 +22,11 @@
 ## 怎么用
 
 1. 准备一个求职工作目录，放入你的求职账本 Excel 和简历文件夹。
-2. 把三个 Skill 目录复制到你的 AI 助手的 Skill 目录（例如 Codex 的 `.agents/skills/` 或 Claude Code 的 `.claude/skills/`）。
-3. 按 `campus-job-application/references/profile-template.md` 在工作目录建立 `产品管理/求职配置.md`，填入工作簿、地区表、目标届别、岗位方向、简历位置等你自己的信息。Skill 本身不含任何个人取值，全部从这份配置读取；缺失时 AI 会先问你再创建。
+2. 把三个 Skill 目录复制到你的 AI 助手的 Skill 目录（例如 Codex 的 `.agents/skills/` 或 Claude Code 的 `.claude/skills/`）。目录名开头的【中文】用来说明用途，可以原样保留；AI 按 `SKILL.md` 里的 `name` 识别 Skill。
+3. 按 `【校招岗位收集与投递】campus-job-application/references/profile-template.md` 在工作目录建立 `产品管理/求职配置.md`，填入工作簿、地区表、目标届别、岗位方向、简历位置等你自己的信息。Skill 本身不含任何个人取值，全部从这份配置读取；缺失时 AI 会先问你再创建。
 4. 对 AI 说"开始新一批校招信息收集"，它会先调用 `campus-job-preference-intake` 和你确认范围。
 
-工作簿的表结构见 `campus-job-application/references/workbook-schema.md`，浏览器与提交门禁见 `campus-job-application/references/browser-and-submission-gates.md`。
+工作簿的表结构见 `【校招岗位收集与投递】campus-job-application/references/workbook-schema.md`，浏览器与提交门禁见 `【校招岗位收集与投递】campus-job-application/references/browser-and-submission-gates.md`。
 
 ## 关于本仓库
 

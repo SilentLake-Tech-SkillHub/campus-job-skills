@@ -22,8 +22,8 @@ Use this Skill only inside a job-search workspace that has the project's job-sea
 - Before workbook work, read [references/workbook-schema.md](references/workbook-schema.md).
 - Regional role tables include a `备注` field after `校招计划`. Record employment-path qualifications and material uncertainties there using official evidence; the note never changes the role's actual employment type or application authority.
 - Use the `校招主链接` index as the first lookup for a company's verified official campus-recruitment landing page and published application window. If absent or stale, verify and save the official URL before declaring the company complete. A master link never replaces the direct `岗位链接` required for each real role row.
-- Before role filtering for each company, run [campus-job-plan-inventory](../campus-job-plan-inventory/SKILL.md). Its first project run initializes coverage for the company List; each company visit refreshes that company's current applicable plans and cross-plan application relationships. Never generalize one plan's zero-result search to the whole company.
-- Before every new Open/filter company or industry batch, run [campus-job-preference-intake](../campus-job-preference-intake/SKILL.md). Skip this preflight only when the user has already opened concrete role pages and asked to process them.
+- Before role filtering for each company, run [campus-job-plan-inventory](../【校招计划盘点】campus-job-plan-inventory/SKILL.md). Its first project run initializes coverage for the company List; each company visit refreshes that company's current applicable plans and cross-plan application relationships. Never generalize one plan's zero-result search to the whole company.
+- Before every new Open/filter company or industry batch, run [campus-job-preference-intake](../【校招批次范围确认】campus-job-preference-intake/SKILL.md). Skip this preflight only when the user has already opened concrete role pages and asked to process them.
 - Before Open/filter, browser filling, or submission, read [references/browser-and-submission-gates.md](references/browser-and-submission-gates.md).
 
 ## Mode selection

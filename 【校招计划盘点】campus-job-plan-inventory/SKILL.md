@@ -5,7 +5,7 @@ description: Inventory current campus-recruitment plans for companies in the car
 
 # 校招计划初始化与刷新
 
-Use only in a job-search workspace with a job-search profile (`产品管理/求职配置.md`), before `campus-job-application` opens or filters a company's roles. Read the workbook schema in `../campus-job-application/references/workbook-schema.md` before editing.
+Use only in a job-search workspace with a job-search profile (`产品管理/求职配置.md`), before `campus-job-application` opens or filters a company's roles. Read the workbook schema in `../【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` before editing.
 
 ## One-time project initialization
 
