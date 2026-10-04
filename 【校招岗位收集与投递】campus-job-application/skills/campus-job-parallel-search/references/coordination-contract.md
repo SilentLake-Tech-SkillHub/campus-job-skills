@@ -23,3 +23,5 @@ Merge evidence records delta validation, current workbook Hash, backup reference
 ## Allocation decision evidence
 
 Keep a private readable proposal alongside the manifest: the user's explicit requirements or ideas, Query/progress references, chosen grouping and count rationale, estimated workload and uncertainty, participant/worker/coordinator counts, actual concurrent capacity, wave/handoff arrangement where needed, configurable numeric or nonnumeric targets and stopping conditions, and user confirmation reference. These decision records precede dispatch. The snapshot validator does not judge allocation quality, confirm a proposal, optimize participant counts or enforce platform capacity. Reuse an unchanged confirmed proposal; version material changes and preserve their effective time and approval.
+
+Delta acceptance and user reports also require the [progress contract](../../../references/research-progress.md): result status, current-cycle attempt evidence, coverage bucket, exact gaps and merge/readback state are independent required fields. A legacy delta lacking them is received evidence pending adaptation and review, not an accepted completed delivery.

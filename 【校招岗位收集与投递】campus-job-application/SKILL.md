@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.1.1"
+  version: "1.1.2"
 ---
 
 # 校招职位刷新与投递协作
@@ -147,6 +147,9 @@ This is the standing row-organization logic for every regional role sheet listed
 6. Never withdraw, delete, or resubmit an application without a new explicit user instruction.
 
 ## Verification and records
+
+查询、续跑、外部交付验收及进展汇报前，必须加载[研究进度与标签强制核对](references/research-progress.md)，读取当前Excel标签和备注及有效流水。交付/汇报前运行其进度校验脚本；有本届已查证据的公司不得仅以“尚未推进”描述或计作完全未做。
+
 
 - Follow the active Plans listed in the job-search profile and project Router. On a fresh conversation, reload this Skill and read the confirmed scope, workbook, Plan, and research log. Determine the current stage before choosing a company. Stage 1 selects the next company with no prior scoped coverage; Stage 2 selects only user-approved gaps. Never treat `部分盘点` as an instruction to reopen a company or backfill a prior role. In information collection, write each newly verified in-scope role row immediately.
 - Use the Spreadsheets skill for every workbook edit and perform data, formula/error, export, and visual checks proportionate to the changed range.

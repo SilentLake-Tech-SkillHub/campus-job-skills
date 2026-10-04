@@ -1,5 +1,7 @@
 ---
 name: campus-job-plan-inventory
+metadata:
+  version: "1.0.1"
 description: Identify and inventory applicable campus-recruitment plans once per company during the first-pass sweep; after that sweep, investigate plan-relationship gaps only when the user selects them.
 ---
 
@@ -19,7 +21,7 @@ Use only in a job-search workspace with a job-search profile (`产品管理/求�
 - `无当年校招计划`: accessible official recruitment sources checked for the target cohort show no applicable current-year campus plan. The `备注` names the checked source, cohort and date; this is an observed result, not a claim that the company will never recruit. An older-cycle plan or ordinary social-recruitment page is insufficient current-year evidence.
 - `无用户要求岗位`: an applicable current-year campus plan and its relevant accessible role listings/JDs were screened against the active Query, with no qualifying role. The `备注` names the plan, pages/filters checked and exclusion reason. Do not use this value if a relevant page/JD remains unread or only one keyword search returned zero.
 - `无法访问校招页面`: an identified applicable campus page or job system could not be read after an actual access attempt. The `备注` gives the exact URL, observed error and unverified scope. This result does not imply either of the two negative hiring outcomes.
-- `尚未推进`: no evidence-supported conclusion among the four values above has been reached for this company/plan scope. This includes a genuinely unvisited scope and a partially checked scope; the `备注` must distinguish them by recording any previous attempt and exact missing evidence. `尚未推进` alone is never permission to re-search a previously visited scope.
+- `尚未推进`: no evidence-supported conclusion among the four values above has been reached for this company/plan scope. Historical rows may include partially checked scopes; the current workbook notes and visit evidence must distinguish them. For reporting, a documented visit must be explicitly shown as “首轮已查｜核验未闭环” with the checked scope and gaps, never reported as completely untouched. `尚未推进` alone is never permission to re-search a previously visited scope.
 
 For a company with multiple plans, classify each plan row by its own evidence, then summarize the company from all rows and the regional role sheet. Do not turn a single plan's negative result into a company-wide negative result. Company aliases or business units sharing an already checked source remain mapped in `备注`; “合并”“用户叫停”“已截止”“资格不符”“仅实习无转正” are not sixth or seventh values. Historical free-text statuses are legacy evidence: preserve them until reviewed, and never bulk relabel by keyword.
 
@@ -44,3 +46,5 @@ Use one dedicated Chrome window per company. Keep that company's master, plan-fi
 - Do not infer independence from separate apply buttons or separate plan names. Do not infer conflict from a shared login or one account.
 - Recheck time-sensitive rules and the logged-in account's remaining opportunities immediately before filling or submitting under the main Skill.
 - Use the Spreadsheets Skill for every workbook edit, with a recoverable backup before structural changes and saved-file/visual validation afterward.
+
+查询、续跑和汇报前必须按[研究进度强制核对](../【校招岗位收集与投递】campus-job-application/references/research-progress.md)读取当前工作簿状态、备注和有效流水，运行覆盖记录校验。历史“首轮已查”状态/备注是访问证据，不能被旧标签枚举忽略。

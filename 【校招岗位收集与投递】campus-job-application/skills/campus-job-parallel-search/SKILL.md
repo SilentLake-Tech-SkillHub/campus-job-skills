@@ -2,7 +2,7 @@
 name: campus-job-parallel-search
 description: Coordinate user-approved multi-Agent campus-job research with exclusive source assignments, independent evidence outputs and serial tracker reconciliation. Use after this search batch selects multiple AI participants; it does not prepare or submit applications.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
 ---
 
 # 多 Agent 共同搜索岗位
@@ -42,3 +42,5 @@ Business targets are batch choices. Ask whether the user wants a numerical targe
 On interruption, persist output and exact unfinished scope. The coordinator records a new assignment version, old owner stopping acknowledgement, new owner and recovery step; the new owner accepts that version before reopening sources. Uncertain ownership stops only the conflicting scope. Resume from saved evidence instead of restarting searches.
 
 Report allocated companies, documented visits, verified coverage, mapped sources, received deltas, accepted deltas, workbook-readback successes, blocked/unprocessed scopes and outstanding gaps separately. A file count or blank row proves none of these. Search cooperation never authorizes form filling, résumé upload or submission; route a separately authorized application batch to the independent application workflow, with its own execution-mode Query.
+
+Before accepting a delta or reporting progress, load [the mandatory progress contract](../../references/research-progress.md) and run its validator. Read current tracker notes and dated evidence; a raw incomplete label cannot erase a documented first-pass visit. Legacy outputs require an evidence-preserving audit adapter before acceptance.
