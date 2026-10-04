@@ -2,12 +2,14 @@
 name: campus-job-preference-intake
 description: Confirm each campus-recruitment batch's company scope and semantic role families, then resolve material role-boundary questions before official searches.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # 校招岗位偏好确认
 
 Use this Skill in the **Query stage** before a new `Open/filter` batch in a job-search workspace; read its job-search profile (`产品管理/求职配置.md`) for the workbook, regions, target cohort and default role families. It determines this batch's scope and handoff mode only. It does not open a browser page, write the workbook, fill a form, upload a résumé, or submit an application.
+
+Before any multi-AI allocation, proactively ask about explicit participant/count, grouping, priority, time and quantity requirements. If none, invite the user's ideas rather than requiring a finished plan; an explicit request for recommendations permits a proposal. Derive a readable allocation from the confirmed Query, remaining source scopes, effort and available resources, then confirm it before dispatch. Do not hardcode an industry split, participant count or company target from another batch. Record actual simultaneous tool capacity separately from requested total participants; existing same-batch answers are reused.
 
 ## Intake
 

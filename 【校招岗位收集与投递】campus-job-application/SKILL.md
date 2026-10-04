@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 ---
 
 # 校招职位刷新与投递协作
@@ -14,6 +14,8 @@ Use this Skill only inside a job-search workspace that has the project's job-sea
 Before a new search batch opens company pages, ask `本轮岗位搜索由一个 AI 执行，还是由多个 AI 共同执行？` alongside other missing Query choices. Record this batch's explicit choice and evidence; an unanswered question does not enable parallel execution. Reuse a same-batch decision without asking again, and ask only missing coordination facts if multiple AI was already requested. Single AI follows this parent normally. For a confirmed multiple-AI search, load [campus-job-parallel-search](skills/campus-job-parallel-search/SKILL.md) before allocation or dispatch.
 
 In that branch, participants save each verified company and role immediately in their own evidence deltas; only the coordinator serially writes the shared workbook and reads back the company/role links and full JD. This replaces concurrent direct writes, not the parent's save/readback completion gate. Keep company windows protected until applicable readback and closure conditions pass. Application preparation uses the independent application workflow and a separately confirmed execution-mode choice; search delegation grants no application authority.
+
+Before allocation, proactively ask about explicit requirements for participants, grouping, priorities, time and task quantities. If there are none, invite the user's ideas and offer a reasoned proposal. Confirm that proposal before dispatch; reuse same-batch confirmed choices. Participant counts and business targets are configurable batch values, not fixed Skill limits. The parallel subskill explains the proposal and actual tool-capacity boundaries.
 
 ## Inputs and fixed choices
 
