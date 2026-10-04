@@ -1,0 +1,5 @@
+interface:
+  display_name: "多 Agent 共同搜索岗位"
+  short_description: "Coordinate parallel job research and serial evidence merging"
+policy:
+  allow_implicit_invocation: true

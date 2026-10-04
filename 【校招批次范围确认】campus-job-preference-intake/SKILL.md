@@ -1,6 +1,8 @@
 ---
 name: campus-job-preference-intake
 description: Confirm each campus-recruitment batch's company scope and semantic role families, then resolve material role-boundary questions before official searches.
+metadata:
+  version: "1.1.0"
 ---
 
 # 校招岗位偏好确认
@@ -19,6 +21,12 @@ Use this Skill in the **Query stage** before a new `Open/filter` batch in a job-
 8. Reuse role and city preferences already stated for this batch. If genuinely unspecified, ask whether the user wants more restrictions or no additional preference; keep that question separate from the semantic role-family confirmation above.
 9. Treat region, cohort, employment type, role family, role content, city, and batch intent as separate dimensions. A site's default or stale `Intern` filter must not override the resolved scope. Until material choices are confirmed, continue only independent read-only work that cannot predetermine them; do not open a company window with an unresolved retention mode.
 
+## Search execution mode
+
+Before this new batch opens or filters employer pages, ask `本轮岗位搜索由一个 AI 执行，还是由多个 AI 共同执行？` with the other missing scope choices. Record `search_execution_mode` (`single` or `parallel`) and user-choice evidence in this private batch. Reuse an explicit same-batch choice; an already stated multi-AI request requires only remaining participant/count, coordinator, platform-versus-manual-handoff and resource decisions. Do not infer consent from no response. Independent offline comparison may continue while the mode is pending.
+
+Return the choice and missing coordination facts to the search parent. It routes confirmed parallel research to its `campus-job-parallel-search` subskill; single-AI research retains the normal flow. A search choice does not choose or authorize application execution mode. Future batches ask anew unless the user explicitly supplies that batch's choice.
+
 ## Route
 
 - **User-selection branch:** When the user has neither a role nor city preference, open the official campus page using the normal broad view of the confirmed role family. In `准备投递` mode keep it open for the user to choose exact applications; in `信息收集` mode record **every verified in-scope role and its direct link/JD in Excel** before eligible company-window closure. User selection is required for form work, **not** for an information-only role row.
@@ -26,4 +34,4 @@ Use this Skill in the **Query stage** before a new `Open/filter` batch in a job-
 
 ## Handoff
 
-Report the exact company/industry and region set, graduating class, batch intent, employment type, role and city preferences, and selected branch to `campus-job-application`. Record these as **per-batch decisions**, not permanent defaults. Before reporting a zero-result search, verify the site's selected employment-type chips or checkboxes against that scope, then separately verify cohort eligibility and experience requirements from the plan or JD. A preference is a browsing instruction, not a promise that matching roles will exist and not authorization for application filling or submission.
+Report the exact company/industry and region set, graduating class, batch intent, employment type, role and city preferences, selected branch, search execution mode and coordination decision evidence to `campus-job-application`. Record these as **per-batch decisions**, not permanent defaults. Before reporting a zero-result search, verify the site's selected employment-type chips or checkboxes against that scope, then separately verify cohort eligibility and experience requirements from the plan or JD. A preference is a browsing instruction, not a promise that matching roles will exist and not authorization for application filling or submission.
