@@ -1,0 +1,5 @@
+interface:
+  display_name: "内推码查询"
+  short_description: "Find and verify a current-cohort referral code before applying, default source Nowcoder"
+policy:
+  allow_implicit_invocation: true

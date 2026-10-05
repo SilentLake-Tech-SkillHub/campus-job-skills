@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.1.2"
+  version: "1.2.0"
 ---
 
 # 校招职位刷新与投递协作
@@ -16,6 +16,10 @@ Before a new search batch opens company pages, ask `本轮岗位搜索由一个 
 In that branch, participants save each verified company and role immediately in their own evidence deltas; only the coordinator serially writes the shared workbook and reads back the company/role links and full JD. This replaces concurrent direct writes, not the parent's save/readback completion gate. Keep company windows protected until applicable readback and closure conditions pass. Application preparation uses the independent application workflow and a separately confirmed execution-mode choice; search delegation grants no application authority.
 
 Before allocation, proactively ask about explicit requirements for participants, grouping, priorities, time and task quantities. If there are none, invite the user's ideas and offer a reasoned proposal. Confirm that proposal before dispatch; reuse same-batch confirmed choices. Participant counts and business targets are configurable batch values, not fixed Skill limits. The parallel subskill explains the proposal and actual tool-capacity boundaries.
+
+## Referral code (mainland China)
+
+Before preparing any mainland-China company's application, and whenever the user mentions 内推码 or a form shows a referral field, load [campus-job-referral-code](skills/campus-job-referral-code/SKILL.md). It searches Nowcoder (牛客) first, keeps only a code verified for the current cohort, and writes the result to the role rows' `内推码` column. A referral code never changes application authority or the submission gates.
 
 ## Inputs and fixed choices
 

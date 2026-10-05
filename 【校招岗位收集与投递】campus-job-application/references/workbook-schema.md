@@ -44,10 +44,13 @@ Do not merge the regional sheets or create per-company sheets.
 13. `校招冷静期`
 14. `校招计划`
 15. `备注`
+16. `内推码`
 
 `校招计划` in a real role row names the verified source plan. Leave it blank when the source plan cannot be identified; do not infer it from the company. Keep a placeholder company's role-plan cell blank.
 
 `备注` records material, evidence-based role facts that do not fit the existing fields, especially an explicitly stated internship-to-full-time conversion opportunity, cohort eligibility, minimum duration/attendance and conversion conditions. Preserve `实习` in the title and plan; label an eligible case `实习转正候选` and quote the official evidence concisely. State that conversion is an opportunity, not a guarantee. Ordinary internships without explicit official conversion wording remain out of a formal/full-time batch. For a company placeholder with no in-scope role row, keep `岗位名称`/`岗位链接` blank and use `备注` for the checked cohort, sources, date, exact result, any previous attempt, and unresolved scope. Put mergers into another company/plan, user stop decisions, application deadlines, eligibility, and internship conversion facts here; they are not `盘点状态` values. The note must distinguish a truly untouched `尚未推进` row from a partially checked one. This visible note is a pointer to `校招计划` evidence, not a role. This field does not imply user selection or application authorization.
+
+`内推码` is filled by the [referral-code subskill](../skills/campus-job-referral-code/SKILL.md) with the same company-level value on each of the company's role rows, formatted `<码>｜<来源平台>｜<届别/批次>｜<核实日期>｜<来源链接>`, or `未找到｜<已查来源>｜<核实日期>`. Leave it blank until checked; never copy a code from another cohort.
 
 ## Campus plan inventory
 
