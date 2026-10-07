@@ -69,6 +69,19 @@ class PreferenceTests(unittest.TestCase):
         r['selection_ref'] = 'synthetic-user-choice'
         self.assertEqual(self.check(roles=[r]), [])
 
+    def test_cross_axis_reference_without_selection_cannot_start_forms(self):
+        r = role(); r.update(cross_axis_conflict=True, selected=False, selection_ref='synthetic-ref')
+        r['execution']['fill'] = {'status': 'in_progress', 'evidence_ref': 'synthetic-fill'}
+        self.assertTrue(any('explicit user selection' in e for e in self.check(roles=[r])))
+        r['selected'] = True
+        self.assertEqual(self.check(roles=[r]), [])
+        r['selection_ref'] = ''
+        self.assertTrue(any('explicit user selection' in e for e in self.check(roles=[r])))
+
+    def test_uncertain_without_any_attempt_is_rejected(self):
+        r = role(); r.update(stage='uncertain', disposition='pending', material_id='synthetic-resume')
+        self.assertTrue(any('attempted-action evidence' in e for e in self.check(roles=[r])))
+
     def test_weighted_conflict_choice_rejected(self):
         p = preferences(); p['combined_weights'] = {'city': 3, 'direction': 2}
         self.assertTrue(any('weighted' in e for e in self.check(p)))
@@ -207,10 +220,22 @@ class IntegrationTests(unittest.TestCase):
                  coordinator='one', output_roots={'one':'evidence/one'}, source_hash='a'*64,
                  assignment_version=1, assignments=[a], roles=[r], preferences=preferences(), prior_roles=[])
         self.assertEqual(validator.validate(m), [])
+        mutated = copy.deepcopy(m)
+        mutated['roles'][0]['stage'] = 'prepared'
+        mutated['roles'][0]['execution']['fill'] = {'status': 'complete', 'evidence_ref': 'synthetic-fill'}
+        self.assertTrue(any('read-only' in e for e in validator.validate(mutated)))
+        self.assertTrue(any('must all remain not_started' in e for e in validator.validate(mutated)))
+        for action in ['fill', 'save', 'submit']:
+            mutated = copy.deepcopy(m)
+            mutated['roles'][0]['execution'][action] = {'status': 'in_progress', 'evidence_ref': 'synthetic'}
+            self.assertTrue(any('must all remain not_started' in e for e in validator.validate(mutated)))
         delta = dict(batch_id='synthetic', query_version='q2', assignment_version=1, source_hash='a'*64,
                      assignment_id='a', owner='one', preference_version='p1')
         m['deltas'] = [delta]
         self.assertTrue(any('stale delta preference_version' in e for e in validator.validate(m)))
+        delta['preference_version'] = 'p2'
+        delta['roles'] = [mutated['roles'][0]]
+        self.assertTrue(any('must all remain not_started' in e for e in validator.validate(m)))
         m['deltas'] = []; r.pop('pre_form_report_ref')
         self.assertTrue(any('pre_form_report_ref' in e for e in validator.validate(m)))
         r['pre_form_report_ref'] = 'synthetic-report'; a['preference_version'] = 'p1'

@@ -173,7 +173,9 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None):
             errors.append('submitted stage requires complete submit evidence')
         if form_started and disposition in {'pending', 'excluded'}:
             errors.append('pending/excluded role cannot start forms')
-        if role.get('cross_axis_conflict') is True and (form_started or role.get('selected') is True) and not text(role.get('selection_ref')):
+        if role.get('stage') == 'uncertain' and not form_started:
+            errors.append('uncertain stage requires actual attempted-action evidence')
+        if role.get('cross_axis_conflict') is True and (form_started or role.get('selected') is True) and (role.get('selected') is not True or not text(role.get('selection_ref'))):
             errors.append('cross-axis choice needs explicit user selection')
         if role.get('score_includes_preferences') is True or role.get('selected_by_top5') is True:
             errors.append('capability score/Top5 cannot decide preferences')

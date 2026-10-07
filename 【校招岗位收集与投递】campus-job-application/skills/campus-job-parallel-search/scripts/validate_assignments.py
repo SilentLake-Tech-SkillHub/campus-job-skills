@@ -28,6 +28,20 @@ def within(path, root):
     return path == root or root in PurePosixPath(path).parents
 
 
+def search_only_errors(role):
+    errors = []
+    if role.get("stage") not in {None, "discovered", "verified"}:
+        errors.append("search role stage must remain discovered/verified (read-only)")
+    execution = role.get("execution")
+    if not isinstance(execution, dict) or any(
+        not isinstance(execution.get(action), dict)
+        or execution[action].get("status") != "not_started"
+        for action in ("fill", "save", "submit")
+    ):
+        errors.append("search role fill/save/submit must all remain not_started")
+    return errors
+
+
 def validate(data):
     errors = []
     if not isinstance(data, dict):
@@ -126,6 +140,7 @@ def validate(data):
         if assignment is None or role.get("owner") != assignment.get("owner"):
             errors.append("role has unknown assignment or wrong owner")
         if WORKFLOW == "search":
+            errors.extend(search_only_errors(role))
             if not text(role.get("jd_full_text")) or not text(role.get("jd_capture_ref")):
                 errors.append("search role needs full JD and capture reference")
         else:
@@ -168,6 +183,10 @@ def validate(data):
         if assignment is None or delta.get("owner") != assignment.get("owner"):
             errors.append("delta has unknown assignment or wrong owner")
         if "roles" in delta:
+            if isinstance(delta["roles"], list):
+                for role in delta["roles"]:
+                    if isinstance(role, dict):
+                        errors.extend(search_only_errors(role))
             errors.extend(_contract.validate_snapshot(data.get("preferences"), delta["roles"], assignments, []))
         if delta.get("merge_status") == "merged" and not text(delta.get("tracker_readback_ref")):
             errors.append("merged delta needs tracker readback")
