@@ -25,3 +25,7 @@ Merge evidence records delta validation, current workbook Hash, backup reference
 Keep a private readable proposal alongside the manifest: the user's explicit requirements or ideas, Query/progress references, chosen grouping and count rationale, estimated workload and uncertainty, participant/worker/coordinator counts, actual concurrent capacity, wave/handoff arrangement where needed, configurable numeric or nonnumeric targets and stopping conditions, and user confirmation reference. These decision records precede dispatch. The snapshot validator does not judge allocation quality, confirm a proposal, optimize participant counts or enforce platform capacity. Reuse an unchanged confirmed proposal; version material changes and preserve their effective time and approval.
 
 Delta acceptance and user reports also require the [progress contract](../../../references/research-progress.md): result status, current-cycle attempt evidence, coverage bucket, exact gaps and merge/readback state are independent required fields. A legacy delta lacking them is received evidence pending adaptation and review, not an accepted completed delivery.
+
+## 独立偏好与执行证据
+
+manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version 与当前确认版本一致。roles 按 [偏好契约](../../../references/preference-contract.md) 携带所有逐岗字段及 pre_form_report_ref、execution；仅搜索的 fill/save/submit 为 not_started。候补公司覆盖字段放 assignment；旧版本拒收，已投/选岗保护，用户指定复查范围外不重查。

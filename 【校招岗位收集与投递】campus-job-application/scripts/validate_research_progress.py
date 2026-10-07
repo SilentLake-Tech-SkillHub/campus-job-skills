@@ -1,6 +1,7 @@
 """Validate private research progress without inferring external evidence truth."""
 import json
 import sys
+from preference_contract import validate_snapshot
 
 RESULTS = {"已有相关岗位记录", "无当年校招计划", "无用户要求岗位", "无法访问校招页面", "尚未推进"}
 BUCKETS = {"first-pass-covered", "first-pass-visited-but-unresolved", "cycle/evidence-ambiguous-deferred", "first-pass-unvisited"}
@@ -11,11 +12,16 @@ def validate(data):
     records = data.get("records") if isinstance(data, dict) else None
     if not isinstance(records, list) or not records:
         return ["records must be a nonempty list"]
+    errors.extend(validate_snapshot(data.get("preferences"), data.get("roles"), records, data.get("prior_roles")))
+    prefs = data.get("preferences")
+    version = prefs.get("version") if isinstance(prefs, dict) else None
     seen = set()
     for index, row in enumerate(records):
         if not isinstance(row, dict):
             errors.append(f"record {index}: object required")
             continue
+        if row.get("preference_version") != version or not version:
+            errors.append(f"record {index}: stale preference_version")
         ident = row.get("id")
         prefix = f"record {index}"
         def error(message):

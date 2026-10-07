@@ -27,3 +27,7 @@ Copy this file to `<workspace>/产品管理/求职配置.md` and fill in your ow
 ## 活动 Plan
 
 - `<path to active plans>`
+
+## 独立偏好与执行证据
+
+硬范围与偏好分开记录：复制 [偏好空模板](preference-template.md) 到私有配置，保存三个轴原话/关系、版本/生效时间/确认依据/替代版本及指定复查范围。公共模板无个人默认值。

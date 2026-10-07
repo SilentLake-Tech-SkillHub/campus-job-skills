@@ -56,3 +56,7 @@ Keep the form open. `待投递` remains the workbook status.
 - Capture the minimum area that proves the state while retaining enough context to identify the site and step.
 - Avoid exposing phone numbers, email addresses, addresses, identification numbers, birth dates, signatures, or uploaded document contents when the same evidence can be captured without them.
 - Do not save passwords, cookies, OTPs, tokens, or identity-document contents in project files.
+
+## 独立偏好与执行证据
+
+Open/filter 依 [偏好契约](preference-contract.md) 仅用硬范围筛除，排序不限制覆盖。填写前逐岗展示公司、岗位、直链、BU 或未披露、城市、用工、方向、完整 JD 依据及筛选理由，持久化 pre_form_report_ref；退出/交付报告 fill/save/submit 的实际状态与证据，不以登录代替准备。Review 保留表单版本，提交继续精确目标与版本审核。

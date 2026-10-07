@@ -2,7 +2,7 @@
 name: campus-job-parallel-search
 description: Coordinate user-approved multi-Agent campus-job research with exclusive source assignments, independent evidence outputs and serial tracker reconciliation. Use after this search batch selects multiple AI participants; it does not prepare or submit applications.
 metadata:
-  version: "1.0.2"
+  version: "1.1.0"
 ---
 
 # 多 Agent 共同搜索岗位
@@ -28,6 +28,10 @@ If the user supplies a participant count or grouping requirement, honor it withi
 Present a readable proposal with the Query/evidence references, proposed participants and coordinator, each owner's scope and outputs, grouping/count rationale, estimated workload, time/resource constraints, quantity/stop conditions and known gaps. Ask the user to confirm or adjust it before dispatch. An execution-mode choice alone does not approve an inferred allocation. Record the confirmed proposal and evidence in private batch records, then produce the versioned manifest. Reuse the unchanged confirmed allocation on continuation; material scope, ownership or count changes require a revised proposal and the handoff controls below.
 
 Business targets are batch choices. Ask whether the user wants a numerical target, coverage of a confirmed list, a time window, or another explicit stopping rule. Do not impose a fixed number of companies, roles or applications, force equal-size groups, or silently fill missing numbers from earlier batches. A numeric target is a goal unless the user explicitly makes it a ceiling or stopping condition. Changing a confirmed goal needs an effective-time record and user agreement; absence of a numeric target does not expand the confirmed scope. Official application/account limits and exact-role submission approval remain binding.
+
+## 偏好版本与逐岗交付
+
+分配前读取 [偏好契约](../../references/preference-contract.md)。每份 assignment、role、delta 携带 preference_version；协调者拒收旧版本，先复用原 JD，只重查用户指定范围。独立偏好轴不得被参与者合成分数。交付需逐岗报告、JD 依据、就业/城市/方向、BU 未披露标记及执行状态；公司覆盖不足不得给实习候补或无正式岗结论。保留已投与明确选择，账号独占和串行写 Excel 继续生效。
 
 ## Execute and reconcile
 
