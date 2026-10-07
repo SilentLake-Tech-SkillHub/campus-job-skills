@@ -5,6 +5,12 @@ import json
 import re
 from pathlib import Path, PurePosixPath
 
+# Resolve inside the complete installed parent package, independent of cwd.
+import importlib.util
+_spec = importlib.util.spec_from_file_location("preference_contract", Path(__file__).resolve().parents[3] / "scripts/preference_contract.py")
+_contract = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_contract)
+
 WORKFLOW = 'search'
 STAGES = {"discovered", "verified", "preparing", "prepared", "reviewed", "submit_clicked", "submitted", "uncertain"}
 PREPARED = {"prepared", "reviewed", "submit_clicked", "submitted", "uncertain"}
@@ -20,6 +26,36 @@ def relative(value):
 
 def within(path, root):
     return path == root or root in PurePosixPath(path).parents
+
+
+def not_started(execution):
+    return isinstance(execution, dict) and all(
+        execution.get(action) == {"status": "not_started"}
+        for action in ("fill", "save", "submit")
+    )
+
+
+def search_only_errors(role, prior_roles):
+    if role.get("historical_readonly") is True:
+        prior = next((item for item in prior_roles if isinstance(item, dict)
+                      and item.get("role_key") == role.get("role_key")), None) if isinstance(prior_roles, list) else None
+        if (prior is None or prior.get("stage") != "submitted"
+                or not text(prior.get("receipt_ref")) or not isinstance(prior.get("execution"), dict)):
+            return ["historical read-only role requires prior submitted receipt and execution snapshot"]
+        errors = []
+        for field in ("stage", "receipt_ref", "execution", "material_id", "review_hash",
+                      "approved_review_hash", "approval_ref", "selected", "selection_ref"):
+            if role.get(field) != prior.get(field):
+                errors.append("historical read-only role changed prior " + field)
+        if not not_started(role.get("current_batch_execution")):
+            errors.append("historical read-only role cannot perform current-batch form actions")
+        return errors
+    errors = []
+    if role.get("stage") not in {None, "discovered", "verified"}:
+        errors.append("search role stage must remain discovered/verified (read-only)")
+    if not not_started(role.get("execution")):
+        errors.append("search role fill/save/submit must all remain not_started")
+    return errors
 
 
 def validate(data):
@@ -120,6 +156,7 @@ def validate(data):
         if assignment is None or role.get("owner") != assignment.get("owner"):
             errors.append("role has unknown assignment or wrong owner")
         if WORKFLOW == "search":
+            errors.extend(search_only_errors(role, data.get("prior_roles")))
             if not text(role.get("jd_full_text")) or not text(role.get("jd_capture_ref")):
                 errors.append("search role needs full JD and capture reference")
         else:
@@ -139,6 +176,12 @@ def validate(data):
                 errors.append("submitted role needs official receipt")
             if stage != "submitted" and text(role.get("tracker_status")) and role.get("tracker_status") in {"submitted", "已提交"}:
                 errors.append("tracker claims submitted without verified stage")
+    errors.extend(_contract.validate_snapshot(data.get("preferences"), roles, assignments, data.get("prior_roles"), batch_id=data.get("batch_id")))
+    prefs = data.get("preferences")
+    preference_version = prefs.get("version") if isinstance(prefs, dict) else None
+    for assignment in assignments:
+        if isinstance(assignment, dict) and (assignment.get("preference_version") != preference_version or not preference_version):
+            errors.append("stale assignment preference_version")
     deltas = data.get("deltas", [])
     if not isinstance(deltas, list):
         errors.append("deltas must be a list")
@@ -150,9 +193,20 @@ def validate(data):
         for field in ("batch_id", "query_version", "assignment_version", "source_hash"):
             if delta.get(field) != data.get(field):
                 errors.append("stale or foreign delta " + field)
+        if delta.get("preference_version") != preference_version or not preference_version:
+            errors.append("stale delta preference_version")
         assignment = ids.get(delta.get("assignment_id")) if text(delta.get("assignment_id")) else None
         if assignment is None or delta.get("owner") != assignment.get("owner"):
             errors.append("delta has unknown assignment or wrong owner")
+        if "roles" in delta:
+            if isinstance(delta["roles"], list):
+                for role in delta["roles"]:
+                    if isinstance(role, dict):
+                        errors.extend(search_only_errors(role, data.get("prior_roles")))
+            delta_keys = {r.get("role_key") for r in delta["roles"] if isinstance(r, dict) and text(r.get("role_key"))} if isinstance(delta["roles"], list) else set()
+            prior_snapshot = data.get("prior_roles")
+            delta_prior = [r for r in prior_snapshot if isinstance(r, dict) and text(r.get("role_key")) and r["role_key"] in delta_keys] if isinstance(prior_snapshot, list) else []
+            errors.extend(_contract.validate_snapshot(data.get("preferences"), delta["roles"], assignments, delta_prior, batch_id=data.get("batch_id")))
         if delta.get("merge_status") == "merged" and not text(delta.get("tracker_readback_ref")):
             errors.append("merged delta needs tracker readback")
     return errors

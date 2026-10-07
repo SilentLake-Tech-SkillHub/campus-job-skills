@@ -1,13 +1,17 @@
 ---
 name: campus-job-plan-inventory
 metadata:
-  version: "1.0.1"
+  version: "1.1.0"
 description: Identify and inventory applicable campus-recruitment plans once per company during the first-pass sweep; after that sweep, investigate plan-relationship gaps only when the user selects them.
 ---
 
 # 校招计划初始化与刷新
 
 Use only in a job-search workspace with a job-search profile (`产品管理/求职配置.md`), before `campus-job-application` opens or filters a company's roles. Read the workbook schema in `../【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` before editing.
+
+## 转正实习与覆盖证据
+
+读取 [偏好与证据契约](../【校招岗位收集与投递】campus-job-application/references/preference-contract.md)。按私有配置处理转正实习；conversion_last 在同一汇报排末尾，有正式岗也展示，不需要先完成全部正式覆盖。正式覆盖不足仍须记录缺口，不宣称公司无正式岗。记录 formal_coverage、formal_coverage_refs、suitable_formal_found 和 no_suitable_formal_ref；不把单计划零结果当公司结论，偏好变更不重启首轮。
 
 ## One-time project initialization
 
@@ -34,7 +38,7 @@ Use this Skill in two ordered stages. **Stage 1 first-pass sweep:** for each in-
 
 ### Internship-to-full-time conversion candidates
 
-- When the active Query targets formal/full-time campus roles but the official campus entry or a relevant target-family result surfaces internships, flag only the relevant target-family internships for detail-level conversion checks; do not expand to unrelated internship families.
+- When the active Query selects conversion_last, and the official campus entry or a relevant target-family result surfaces internships, flag only the relevant target-family internships for detail-level conversion checks; do not expand to unrelated internship families.
 - Inspect the official JD for explicit conversion/retention wording (`实习转正`, `留用`, `转正机会`), target cohort, minimum duration/attendance and performance or other conditions. Hand off a candidate only when the target-family JD is in-scope and the official page explicitly states a conversion opportunity. The role remains an internship, is separately labeled `实习转正候选` in the role-table `备注`, and is never counted as a formal/full-time role or guaranteed conversion.
 - Ordinary internships without explicit conversion evidence remain out of scope. Ambiguous or inaccessible wording is recorded as unresolved/pending, not inferred. Track internship plan identity, cross-plan application relationship and limits separately; unknown remains unknown.
 
