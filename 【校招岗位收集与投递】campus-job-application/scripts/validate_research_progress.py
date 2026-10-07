@@ -12,7 +12,9 @@ def validate(data):
     records = data.get("records") if isinstance(data, dict) else None
     if not isinstance(records, list) or not records:
         return ["records must be a nonempty list"]
-    errors.extend(validate_snapshot(data.get("preferences"), data.get("roles"), records, data.get("prior_roles")))
+    errors.extend(validate_snapshot(data.get("preferences"), data.get("roles"), records, data.get("prior_roles"), batch_id=data.get("batch_id")))
+    if not isinstance(data.get("batch_id"), str) or not data["batch_id"].strip():
+        errors.append("batch_id required for batch default order")
     prefs = data.get("preferences")
     version = prefs.get("version") if isinstance(prefs, dict) else None
     seen = set()

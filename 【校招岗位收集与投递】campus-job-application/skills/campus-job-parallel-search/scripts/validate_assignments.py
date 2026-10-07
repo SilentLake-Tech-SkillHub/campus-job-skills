@@ -176,7 +176,7 @@ def validate(data):
                 errors.append("submitted role needs official receipt")
             if stage != "submitted" and text(role.get("tracker_status")) and role.get("tracker_status") in {"submitted", "已提交"}:
                 errors.append("tracker claims submitted without verified stage")
-    errors.extend(_contract.validate_snapshot(data.get("preferences"), roles, assignments, data.get("prior_roles")))
+    errors.extend(_contract.validate_snapshot(data.get("preferences"), roles, assignments, data.get("prior_roles"), batch_id=data.get("batch_id")))
     prefs = data.get("preferences")
     preference_version = prefs.get("version") if isinstance(prefs, dict) else None
     for assignment in assignments:
@@ -203,7 +203,10 @@ def validate(data):
                 for role in delta["roles"]:
                     if isinstance(role, dict):
                         errors.extend(search_only_errors(role, data.get("prior_roles")))
-            errors.extend(_contract.validate_snapshot(data.get("preferences"), delta["roles"], assignments, []))
+            delta_keys = {r.get("role_key") for r in delta["roles"] if isinstance(r, dict) and text(r.get("role_key"))} if isinstance(delta["roles"], list) else set()
+            prior_snapshot = data.get("prior_roles")
+            delta_prior = [r for r in prior_snapshot if isinstance(r, dict) and text(r.get("role_key")) and r["role_key"] in delta_keys] if isinstance(prior_snapshot, list) else []
+            errors.extend(_contract.validate_snapshot(data.get("preferences"), delta["roles"], assignments, delta_prior, batch_id=data.get("batch_id")))
         if delta.get("merge_status") == "merged" and not text(delta.get("tracker_readback_ref")):
             errors.append("merged delta needs tracker readback")
     return errors

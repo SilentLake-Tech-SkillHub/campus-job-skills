@@ -8,11 +8,11 @@ from preference_contract import validate_snapshot, identity, canonical_url
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def preferences():
+def preferences(batch_id='synthetic'):
     return {'version': 'p2', 'confirmation_ref': 'synthetic-confirmation', 'effective_at': 'synthetic-effective-time', 'supersedes_version': None, 'recheck_scope': [], 'hard_scope': {'cities': []},
             'axes': {axis: {'raw': 'synthetic explicitly unrestricted', 'relations': []}
                      for axis in ['employment', 'city', 'direction']},
-            'internship_policy': 'conditional', 'conflict_policy': 'user_decides'}
+            'internship_policy': 'conversion_last', 'default_role_order': 'synthetic user order', 'default_order_confirmation_ref': 'synthetic-order-confirmation', 'default_order_batch_id': batch_id, 'conflict_policy': 'user_decides'}
 
 
 def role(job_id='1'):
@@ -25,6 +25,7 @@ def role(job_id='1'):
             'decision_reason': 'User-confirmed function matches full JD', 'decision_basis': 'jd',
             'hard_scope_pass': True, 'disposition': 'primary', 'preference_version': 'p2',
             'stage': 'verified', 'pre_form_report_ref': 'synthetic-role-report', 'report_precedes_form': True,
+            'company_order_report_ref': 'synthetic-role-report', 'company_order_confirmation_ref': 'synthetic-company-confirmation', 'company_order_decision': 'unchanged',
             'execution': {action: {'status': 'not_started'} for action in ['fill', 'save', 'submit']}}
 
 
@@ -95,33 +96,67 @@ class PreferenceTests(unittest.TestCase):
         warehouse['decision_basis'] = 'title_blacklist'
         self.assertTrue(any('title blacklist' in e for e in self.check(roles=[warehouse])))
 
-    def test_formal_role_prevents_internship_fallback(self):
-        r = role(); r.update(employment_type='internship', disposition='fallback', conversion_ref='synthetic-conversion')
+    def conversion_role(self):
+        r = role('2'); r.update(employment_type='internship', conversion_ref='synthetic-official-conversion', display_position='last')
+        return r
+
+    def test_formal_and_conversion_internship_remain_in_same_report(self):
         c = company(); c['suitable_formal_found'] = True
-        self.assertTrue(any('no suitable formal' in e for e in self.check(roles=[r], companies=[c])))
+        self.assertEqual(self.check(roles=[role(), self.conversion_role()], companies=[c]), [])
 
-    def test_visible_formal_primary_contradicts_fallback_even_if_company_flag_is_wrong(self):
-        intern = role('2'); intern.update(employment_type='internship', disposition='fallback', conversion_ref='synthetic')
-        self.assertTrue(any('formal primary' in e for e in self.check(roles=[role(), intern])))
+    def test_conversion_display_does_not_require_sufficient_formal_coverage(self):
+        c = company(); c.update(formal_coverage='incomplete', suitable_formal_found=None)
+        self.assertEqual(self.check(roles=[role(), self.conversion_role()], companies=[c]), [])
+        c['no_suitable_formal_found'] = True
+        self.assertTrue(any('sufficient coverage' in e for e in self.check(roles=[self.conversion_role()], companies=[c])))
 
-    def test_sufficient_no_formal_coverage_allows_separate_fallback(self):
-        r = role(); r.update(employment_type='internship', disposition='fallback', conversion_ref='synthetic-conversion')
+    def test_conversion_internship_cannot_precede_formal_candidate(self):
+        self.assertTrue(any('cannot follow conversion' in e for e in self.check(roles=[self.conversion_role(), role()])))
+        r = self.conversion_role(); r['display_position'] = 'separate'
+        self.assertTrue(any('same report' in e for e in self.check(roles=[r])))
+
+    def test_ordinary_internship_excluded_from_conversion_policy(self):
+        r = self.conversion_role(); r.pop('conversion_ref')
+        self.assertTrue(any('official conversion evidence' in e for e in self.check(roles=[r])))
+        r['disposition'] = 'excluded'
         self.assertEqual(self.check(roles=[r]), [])
 
-    def test_incomplete_coverage_is_pending_not_no_formal(self):
-        r = role(); r.update(employment_type='internship', disposition='pending')
-        c = company(); c.update(formal_coverage='incomplete', suitable_formal_found=None)
-        self.assertEqual(self.check(roles=[r], companies=[c]), [])
-        c['no_suitable_formal_found'] = True
-        self.assertTrue(any('sufficient coverage' in e for e in self.check(roles=[r], companies=[c])))
-        r.update(disposition='fallback', conversion_ref='synthetic-conversion')
-        self.assertTrue(self.check(roles=[r], companies=[c]))
+    def test_private_policy_has_no_public_default(self):
+        p = preferences(); p['internship_policy'] = 'excluded'
+        self.assertTrue(any('excluded by confirmed policy' in e for e in self.check(p, roles=[self.conversion_role()])))
+        p['internship_policy'] = 'separate'
+        self.assertEqual(self.check(p, roles=[self.conversion_role()]), [])
+        p['internship_policy'] = 'conditional'
+        self.assertTrue(any('invalid internship_policy' in e for e in self.check(p)))
 
-    def test_internship_not_mixed_into_formal_primary(self):
-        r = role(); r['employment_type'] = 'internship'
-        self.assertTrue(any('mix into formal' in e for e in self.check(roles=[r])))
-        p = preferences(); p['internship_policy'] = 'separate'
-        self.assertEqual(self.check(p, roles=[r]), [])
+    def test_missing_batch_default_order_is_rejected(self):
+        for field in ['default_role_order', 'default_order_confirmation_ref', 'default_order_batch_id']:
+            p = preferences(); p.pop(field)
+            self.assertTrue(any(field in e for e in self.check(p)))
+        self.assertTrue(any('different batch' in e for e in validate_snapshot(preferences('old'), [role()], [company()], [], batch_id='new')))
+
+    def test_company_order_gate_reuses_pre_form_report_and_requires_confirmation(self):
+        r = role(); r['execution']['fill'] = {'status': 'in_progress', 'evidence_ref': 'synthetic-fill'}
+        self.assertEqual(self.check(roles=[r]), [])
+        r.pop('company_order_confirmation_ref')
+        self.assertTrue(any('same pre-form report' in e for e in self.check(roles=[r])))
+        r['company_order_confirmation_ref'] = 'synthetic-company-confirmation'
+        r['company_order_report_ref'] = 'unrelated-report'
+        self.assertTrue(any('same pre-form report' in e for e in self.check(roles=[r])))
+
+    def test_historical_marker_cannot_bypass_company_order_gate(self):
+        r = role(); r['execution']['fill'] = {'status': 'in_progress', 'evidence_ref': 'synthetic-fill'}
+        r['historical_readonly'] = True; r.pop('company_order_confirmation_ref')
+        errors = self.check(roles=[r])
+        self.assertTrue(any('historical marker' in e for e in errors))
+        self.assertTrue(any('same pre-form report' in e for e in errors))
+
+    def test_changed_company_order_needs_raw_user_choice(self):
+        r = role(); r['execution']['fill'] = {'status': 'in_progress', 'evidence_ref': 'synthetic-fill'}
+        r['company_order_decision'] = 'changed'
+        self.assertTrue(any('user-provided raw order' in e for e in self.check(roles=[r])))
+        r['company_role_order_raw'] = 'synthetic changed order'
+        self.assertEqual(self.check(roles=[r]), [])
 
     def test_existing_submitted_role_and_receipt_preserved(self):
         old = {'role_key': role()['role_key'], 'stage': 'submitted', 'receipt_ref': 'synthetic-receipt'}
@@ -220,6 +255,8 @@ class IntegrationTests(unittest.TestCase):
                  coordinator='one', output_roots={'one':'evidence/one'}, source_hash='a'*64,
                  assignment_version=1, assignments=[a], roles=[r], preferences=preferences(), prior_roles=[])
         self.assertEqual(validator.validate(m), [])
+        stale = copy.deepcopy(m); stale['preferences']['default_order_batch_id'] = 'other-batch'
+        self.assertTrue(any('different batch' in e for e in validator.validate(stale)))
         mutated = copy.deepcopy(m)
         mutated['roles'][0]['stage'] = 'prepared'
         mutated['roles'][0]['execution']['fill'] = {'status': 'complete', 'evidence_ref': 'synthetic-fill'}
@@ -294,7 +331,7 @@ class IntegrationTests(unittest.TestCase):
              coverage_bucket='first-pass-visited-but-unresolved', checked_at='synthetic-date',
              cycle_ref='synthetic-cycle', attempt_refs=['synthetic-attempt'], coverage_refs=[],
              remaining_gaps=['one JD unread'], merge_status='not_merged', preference_version='p2')
-        m = dict(records=[c], roles=[role()], preferences=preferences(), prior_roles=[])
+        m = dict(batch_id='synthetic', records=[c], roles=[role()], preferences=preferences(), prior_roles=[])
         self.assertEqual(validator.validate(m), [])
         c['coverage_bucket'] = 'first-pass-unvisited'
         self.assertTrue(any('unvisited contradicts' in e for e in validator.validate(m)))

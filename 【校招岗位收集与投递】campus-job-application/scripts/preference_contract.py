@@ -49,10 +49,13 @@ def validate_preferences(preferences):
     scope = preferences.get('hard_scope')
     if not isinstance(scope, dict) or not strings(scope.get('cities')):
         errors.append('hard_scope.cities must be a string list; [] means unrestricted')
-    if preferences.get('internship_policy') not in {'excluded', 'conditional', 'separate'}:
+    if preferences.get('internship_policy') not in {'excluded', 'conversion_last', 'separate'}:
         errors.append('invalid internship_policy')
     if preferences.get('conflict_policy') != 'user_decides':
         errors.append('cross-axis conflicts require user_decides')
+    for field in ['default_role_order', 'default_order_confirmation_ref', 'default_order_batch_id']:
+        if not text(preferences.get(field)):
+            errors.append('preferences missing ' + field)
     axes = preferences.get('axes')
     if not isinstance(axes, dict):
         axes = {}
@@ -75,14 +78,30 @@ def formal_errors(company):
             or not strings(company.get('formal_coverage_refs')) or not company.get('formal_coverage_refs')
             or company.get('suitable_formal_found') is not False
             or not text(company.get('no_suitable_formal_ref'))):
-        return ['fallback/no-formal conclusion requires sufficient coverage and no suitable formal evidence']
+        return ['no-formal conclusion requires sufficient coverage and no suitable formal evidence']
     return []
 
 
-def validate_snapshot(preferences, roles, companies, prior_roles=None):
+def valid_readonly_history(role, prior_roles):
+    if not isinstance(prior_roles, list):
+        return False
+    prior = next((item for item in prior_roles if isinstance(item, dict)
+                  and item.get('role_key') == role.get('role_key')), None)
+    if prior is None or prior.get('stage') != 'submitted' or not text(prior.get('receipt_ref')) or not isinstance(prior.get('execution'), dict):
+        return False
+    if any(role.get(field) != prior.get(field) for field in ['stage', 'receipt_ref', 'execution', 'material_id',
+        'review_hash', 'approved_review_hash', 'approval_ref', 'selected', 'selection_ref']):
+        return False
+    actions = role.get('current_batch_execution')
+    return isinstance(actions, dict) and all(actions.get(a) == {'status': 'not_started'} for a in ['fill', 'save', 'submit'])
+
+
+def validate_snapshot(preferences, roles, companies, prior_roles=None, batch_id=None):
     errors = validate_preferences(preferences)
     prefs = preferences if isinstance(preferences, dict) else {}
     version = prefs.get('version')
+    if batch_id is not None and prefs.get('default_order_batch_id') != batch_id:
+        errors.append('default role order belongs to a different batch; ask anew')
     companies = companies if isinstance(companies, list) else []
     by_company = {c['company_key']: c for c in companies if isinstance(c, dict) and text(c.get('company_key'))}
     for company in companies:
@@ -91,6 +110,7 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None):
     if not isinstance(roles, list):
         return errors + ['roles must be a list']
     seen, current = set(), {}
+    conversion_seen = False
     for role in roles:
         if not isinstance(role, dict):
             errors.append('role evidence must be an object')
@@ -128,26 +148,26 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None):
         if type(role.get('hard_scope_pass')) is not bool:
             errors.append('hard_scope_pass must be boolean')
         disposition = role.get('disposition')
-        if disposition not in {'primary', 'fallback', 'pending', 'excluded'}:
+        if disposition not in {'primary', 'pending', 'excluded'}:
             errors.append('invalid disposition')
-        if disposition in {'primary', 'fallback'} and role.get('hard_scope_pass') is not True:
+        if disposition in {'primary'} and role.get('hard_scope_pass') is not True:
             errors.append('candidate must pass hard scope')
         scope = prefs.get('hard_scope', {})
         allowed = scope.get('cities', []) if isinstance(scope, dict) else []
         if (strings(allowed) and allowed and strings(role.get('cities'))
-                and not set(allowed).intersection(role['cities']) and disposition in {'primary', 'fallback'}):
+                and not set(allowed).intersection(role['cities']) and disposition in {'primary'}):
             errors.append('candidate outside explicit hard city scope')
-        if disposition == 'fallback':
-            if prefs.get('internship_policy') != 'conditional' or role.get('employment_type') != 'internship':
-                errors.append('fallback requires conditional internship policy')
-            if not text(role.get('conversion_ref')):
-                errors.append('fallback needs official conversion evidence')
-            errors.extend(formal_errors(by_company.get(role.get('company_key'), {})))
-            if any(isinstance(other, dict) and other.get('company_key') == role.get('company_key') and other.get('employment_type') == 'formal' and other.get('disposition') == 'primary' for other in roles):
-                errors.append('formal primary role contradicts internship fallback')
-        if (role.get('employment_type') == 'internship' and disposition == 'primary'
-                and prefs.get('internship_policy') != 'separate' and not text(role.get('selection_ref'))):
-            errors.append('internship cannot mix into formal primary list')
+        if role.get('employment_type') == 'internship' and disposition == 'primary':
+            if prefs.get('internship_policy') == 'conversion_last':
+                if not text(role.get('conversion_ref')):
+                    errors.append('conversion internship needs official conversion evidence')
+                if role.get('display_position') != 'last':
+                    errors.append('conversion internship belongs last in the same report')
+                conversion_seen = True
+            elif prefs.get('internship_policy') != 'separate':
+                errors.append('internship excluded by confirmed policy')
+        elif disposition == 'primary' and conversion_seen and prefs.get('internship_policy') == 'conversion_last':
+            errors.append('formal candidate cannot follow conversion internships in the report')
         if role.get('report_precedes_form') is not True:
             errors.append('pre-form per-role report required before form action')
         execution = role.get('execution')
@@ -173,6 +193,16 @@ def validate_snapshot(preferences, roles, companies, prior_roles=None):
             errors.append('submitted stage requires complete submit evidence')
         if form_started and disposition in {'pending', 'excluded'}:
             errors.append('pending/excluded role cannot start forms')
+        readonly_history = role.get('historical_readonly') is True and valid_readonly_history(role, prior_roles)
+        if role.get('historical_readonly') is True and not readonly_history:
+            errors.append('historical marker requires an unchanged submitted snapshot and no current-batch actions')
+        if form_started and not readonly_history:
+            if (not text(role.get('company_order_confirmation_ref'))
+                    or role.get('company_order_report_ref') != role.get('pre_form_report_ref')
+                    or role.get('company_order_decision') not in {'unchanged', 'changed'}):
+                errors.append('company order must be confirmed using the same pre-form report before actions')
+            if role.get('company_order_decision') == 'changed' and not text(role.get('company_role_order_raw')):
+                errors.append('changed company order needs user-provided raw order')
         if role.get('stage') == 'uncertain' and not form_started:
             errors.append('uncertain stage requires actual attempted-action evidence')
         if role.get('cross_axis_conflict') is True and (form_started or role.get('selected') is True) and (role.get('selected') is not True or not text(role.get('selection_ref'))):

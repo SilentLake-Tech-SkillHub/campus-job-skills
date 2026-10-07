@@ -15,7 +15,7 @@
 | cycle/evidence-ambiguous-deferred | 已有线索｜届别或访问证据待确认 | 旧记录缺可靠届别、核查时间或访问依据，无法确认本届实查。保留待核，不能归作完全未做。 |
 | first-pass-unvisited | 尚未访问 | 没有本届尝试证据，也没有需保留的模糊旧记录。仅这一类可进入首轮新搜索队列。 |
 
-交付与汇报前必须运行`python3 scripts/validate_research_progress.py <private-progress.json>`（路径相对此父Skill）。输入为`{"records": [...]}`。每条包含`id`、`result_status`（五类之一；待分类可为null）、`raw_status`、`coverage_bucket`、`attempt_refs`、`checked_at`、`cycle_ref`、`coverage_refs`、`remaining_gaps`及`merge_status`（`not_merged`/`partially_merged`/`merged`；已合并另有`readback_ref`）。旧交付缺字段时先生成保留原文路径与Hash的审计适配记录，不能修改原文件、杜撰时间或把文件mtime当核查时间。
+交付与汇报前必须运行`python3 scripts/validate_research_progress.py <private-progress.json>`（路径相对此父Skill）。输入为`{"batch_id": "<本批ID>", "preferences": {...}, "roles": [...], "prior_roles": [...], "records": [...]}`。每条包含`id`、`result_status`（五类之一；待分类可为null）、`raw_status`、`coverage_bucket`、`attempt_refs`、`checked_at`、`cycle_ref`、`coverage_refs`、`remaining_gaps`及`merge_status`（`not_merged`/`partially_merged`/`merged`；已合并另有`readback_ref`）。旧交付缺字段时先生成保留原文路径与Hash的审计适配记录，不能修改原文件、杜撰时间或把文件mtime当核查时间。
 
 此脚本检查结构和明显矛盾，不证明外部事实或替代逐项来源核验。只有结构检查及来源/范围核验满足相应阶段，才可接收或合并；失败保留待修，不用非标准`done`绕过。
 
@@ -23,4 +23,4 @@
 
 ## 独立偏好与执行证据
 
-输入顶层包含 preferences、roles、prior_roles；各 record 含 preference_version。按 [偏好证据契约](preference-contract.md) 校验旧版本、逐岗前置报告、身份及已投/选岗保护。候补或 no_suitable_formal_found: true 结论需充分正式覆盖和无合适正式岗依据；不足标待核，不能称无正式岗。偏好更新只复用原 JD 与指定复查范围，不重新入首轮。无岗位时 roles 为空，仍需公司覆盖证据。结构检查不验证自然语言或网站真伪，也不是平台强制 hook。
+输入顶层包含 preferences、roles、prior_roles；各 record 含 preference_version。按 [偏好证据契约](preference-contract.md) 校验旧版本、逐岗前置报告、身份及已投/选岗保护。no_suitable_formal_found: true 结论需充分正式覆盖和无合适正式岗依据；不足不能称无正式岗。转正实习展示不受这项门槛限制。偏好更新只复用原 JD 与指定复查范围，不重新入首轮。无岗位时 roles 为空，仍需公司覆盖证据。结构检查不验证自然语言或网站真伪，也不是平台强制 hook。

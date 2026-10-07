@@ -10,9 +10,17 @@ Query、计划盘点、收集、Prepare、Review、续跑与 closeout 均读取�
 - `匹配度` 只评价完整 JD 与已确认能力材料的适配，不掺城市/路径偏好；城市只在确实改变 JD 能力要求且有依据时影响能力适配。Top5 是既有高亮展示容量，分数相同用原行序仅安排展示；不意味着自动保留/排除、优先投递或关闭其他岗位。
 - 用户已给本批取值则复用，仅问剩余歧义。更新记录 `version`、生效时间、确认引用、替代版本及复查范围。保留已投状态、回执和明确选岗；不撤回、不重投、不自动重启首轮扫站。先复用已保存完整 JD，仅在用户指定公司/缺口内复查；旧版本增量拒收并等待人工协调，不能改版本号冒充新结果。
 
-## 就业路径：正式与实习候补不混排
+## 默认次序与公司动作前确认
 
-`internship_policy` 可配置 `excluded`（不收）、`separate`（独立实习批次）、`conditional`（正式优先，条件候补）。不可把任意正式批次自动解释为允许实习。条件候补需同时满足：本公司目标届别与方向的正式计划、相关 BU、同义标题/分类、分页及完整 JD 覆盖充分；没有合适正式岗；实习 JD 属于方向且官方明确写转正机会、条件及资格。公司有合适正式岗则实习不进入正式清单或候补；若仅用户指定某岗例外，保留其明确选择并单列例外依据，不静默换岗。覆盖不足写 `pending/待核`，不能宣称“无正式岗”。纯实习及转正含糊不推断。候补永远单列且标实习、转正机会非保证。
+每批开始时先向用户要本批默认岗位类别次序；同批已有明确回答可引用，新批不得沿用上一批。续跑的首回合若缺本批确认，也必须先问，确认后才能写行、重排或生成汇总。`default_role_order` 保存用户原话，`default_order_confirmation_ref` 保存确认依据，`default_order_batch_id` 绑定本批。
+
+每家公司开始申请操作前，用同一份逐岗报告先展示公司、BU 或未披露、办公地、岗位及直链，再问“相对本批默认次序有没有变动？”确认后继续。该报告就是 `pre_form_report_ref`，公司次序确认保存为 `company_order_confirmation_ref`，`company_order_report_ref` 必须引用同一报告；`company_order_decision` 为 unchanged/changed，改变时保存 `company_role_order_raw`。不能拿仅登录或旧批确认代替。校园收集流程在交给投递助手时传递同一报告和确认，不重复建立独立确认清单。最终提交仍审核当前具体目标与表单版本；前面的次序确认不能授权提交，目标变化须重新确认。
+
+## 就业路径：可配置的转正实习次序
+
+`internship_policy` 由用户在私有项目选择，没有公共默认值：`excluded` 不收实习；`separate` 表示用户明确选择独立实习批次；`conversion_last` 只纳入官方明确转正机会、资格和条件且方向符合的实习，与其他岗位在同一份汇报里排最后。该配置改变展示优先级，不把岗位排除出主清单；有合适正式岗也保留转正实习，不以正式覆盖充分或“无合适正式岗”为展示前提。普通实习在 conversion_last 下不纳入，转正含糊/详情不可达标待核，不保证转正。
+
+正式覆盖记录仍说明实际已查范围与缺口；覆盖不足不能宣称公司无正式岗，但不妨碍已核转正实习进入同一汇报。roles 的候选均为 primary；按同一报告顺序存放，conversion_last 的实习候选排在其他候选之后且 `display_position: last`。公开空模板不预填实际个人次序或政策。旧 conditional/fallback 快照先保留原件、按新确认版本适配，不静默改版本或重置历史。
 
 ## 标题＋完整 JD：职责决定方向
 
@@ -22,15 +30,15 @@ Query、计划盘点、收集、Prepare、Review、续跑与 closeout 均读取�
 
 身份键优先 `company_key + ':id:' + official_job_id`（company_key 含官方 ATS/招聘主体）；无官方 ID 则 `company_key + ':url:' + canonical_url`。规范直链只去已知跟踪参数 utm_* / ref / source，保留岗位、BU、计划等业务参数；不同 ID 的同名不同 BU/城市不可合并，一个官方多城市 ID 不膨胀成多个岗位。身份待核时保留待核证据，不造 ID 或猜直链。
 
-每个已核岗位在表单前的报告和最终报告必须包括：公司、岗位、直链、BU（缺失写 `未披露`）、官方城市、用工性质、方向、完整 JD 与捕获引用、决定性 JD 依据、纳入/排除/待核理由、偏好版本、正式覆盖/候补依据、实际填写/保存/提交状态及证据。未执行明确写 `not_started`，不能只报已登录。被排除或待核条目也保留依据和缺口，不误计为已核/已准备。
+每个已核岗位在表单前的报告和最终报告必须包括：公司、岗位、直链、BU（缺失写 `未披露`）、官方城市、用工性质、方向、完整 JD 与捕获引用、决定性 JD 依据、纳入/排除/待核理由、偏好版本、覆盖缺口与转正依据、实际填写/保存/提交状态及证据。未执行明确写 `not_started`，不能只报已登录。被排除或待核条目也保留依据和缺口，不误计为已核/已准备。
 
 `pre_form_report_ref` 指表单动作前已经展示的逐岗包，`report_precedes_form: true` 是执行者声明，必须现场核验；发现、信息收集或排除记录也要有逐岗报告，未开表单时该布尔字段为 true 表示仍在动作前。Review 还包含材料、字段读回、表单版本、账户名额与未决项，目标和表单版本的既有审核仍生效。`execution` 三个独立项 `fill/save/submit` 各为 `{status, evidence_ref}`；允许 `not_started/in_progress/complete/blocked/uncertain`，除未开始外必须有证据引用。登录不等于填写，显示已填不等于保存，点击不等于回执。`submitted` 仍须父校验器的回执要求；`submit.complete` 也必须为 submitted 且有回执。
 
 ## 私有 JSON 字段（不新增 Excel 列或枚举）
 
-所有新快照包含 `preferences`；批次台账放在 `batch.preferences`，搜索进度/并行 manifest 放顶层。它含非空 `version/confirmation_ref/effective_at`、`supersedes_version`（null 或旧版本）、`recheck_scope`（用户指定缺口列表；空列表不授权复查）、对象 `hard_scope`（`cities` 为字符串列表）、三个轴各含 `raw/relations`、`internship_policy` 及 `conflict_policy: user_decides`。各岗位和增量携带同一 `preference_version`。
+所有新快照包含 `preferences`；批次台账放在 `batch.preferences`，搜索进度/并行 manifest 放顶层。它含非空 `version/confirmation_ref/effective_at`、`supersedes_version`（null 或旧版本）、`recheck_scope`（用户指定缺口列表；空列表不授权复查）、对象 `hard_scope`（`cities` 为字符串列表）、三个轴各含 `raw/relations`、本批 `default_role_order/default_order_confirmation_ref/default_order_batch_id`、`internship_policy` 及 `conflict_policy: user_decides`。各岗位和增量携带同一 `preference_version`。
 
-`roles` 保存 `role_key/company_key/official_job_id`（无 ID 用 canonical 直链）、`company/title/direct_url/bu/cities/employment_type/direction/jd_full_text/jd_capture_ref/jd_basis/decision_reason/decision_basis`（`jd` 或 `scope`）、`hard_scope_pass`（布尔）、`disposition`（primary/fallback/pending/excluded）、`preference_version/pre_form_report_ref/report_precedes_form/execution`。`fallback` 另有 `conversion_ref`；公司有无合适正式岗结论通过 `no_suitable_formal_found: true` 明确声明；公司记录用 `formal_coverage: sufficient|incomplete`、`formal_coverage_refs`、`suitable_formal_found`（布尔）和 `no_suitable_formal_ref` 证明候补判定的声明依据。进度条目和 allocation 同样携带这几项公司覆盖字段（仅候补/无正式结论需要）。
+`roles` 保存 `role_key/company_key/official_job_id`（无 ID 用 canonical 直链）、`company/title/direct_url/bu/cities/employment_type/direction/jd_full_text/jd_capture_ref/jd_basis/decision_reason/decision_basis`（`jd` 或 `scope`）、`hard_scope_pass`（布尔）、`disposition`（primary/pending/excluded）、`preference_version/pre_form_report_ref/report_precedes_form/execution`。conversion_last 的实习候选另有 `conversion_ref` 与 `display_position: last`；公司有无合适正式岗结论通过 `no_suitable_formal_found: true` 明确声明。只有这类无正式岗结论才需要 `formal_coverage: sufficient`、非空 `formal_coverage_refs`、`suitable_formal_found:false` 和 `no_suitable_formal_ref`；它们不是转正实习展示门槛。
 
 跨轴冲突在岗位上记录 `cross_axis_conflict: true`；选择/替代它需要 `selected: true` 与 `selection_ref`，否则仅展示且不执行表单。`prior_roles` 是私有上一快照的身份/`stage/receipt_ref/selected`；当前快照必须保留已投及明确选择，任何获明确新指令的更改留 `change_authorization_ref`。偏好更新本身不是这项授权。缺少旧版本字段或逐岗报告的历史增量先适配和人工复核，不能作为新完整交付接收。
 

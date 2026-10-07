@@ -28,8 +28,10 @@ Delta acceptance and user reports also require the [progress contract](../../../
 
 ## 独立偏好与执行证据
 
-manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version 与当前确认版本一致。roles 按 [偏好契约](../../../references/preference-contract.md) 携带所有逐岗字段及 pre_form_report_ref、execution；仅搜索的 fill/save/submit 为 not_started。候补公司覆盖字段放 assignment；旧版本拒收，已投/选岗保护，用户指定复查范围外不重查。
+manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version 与当前确认版本一致。roles 按 [偏好契约](../../../references/preference-contract.md) 携带所有逐岗字段及 pre_form_report_ref、execution；仅搜索的 fill/save/submit 为 not_started。公司覆盖字段放 assignment（仅无正式岗结论须充分覆盖）；旧版本拒收，已投/选岗保护，用户指定复查范围外不重查。
 
 ## 搜索中的只读历史保留
 
 本批新发现岗位保持 discovered/verified（或未填写 stage）及 execution 三项 not_started。保留既有已投岗位时使用 historical_readonly:true；原 stage/receipt_ref/execution/材料与审核确认身份不变，prior_roles 保存其完整执行快照以逐字段比对，另用 current_batch_execution 的 fill/save/submit 全 {status:not_started} 明确本批未操作。顶层和 delta 都校验此例外。没有完整历史快照的旧记录先保留原件并适配/人工核验，不能重置原提交证据、冒称历史或以历史标记授权新表单动作。
+
+每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。

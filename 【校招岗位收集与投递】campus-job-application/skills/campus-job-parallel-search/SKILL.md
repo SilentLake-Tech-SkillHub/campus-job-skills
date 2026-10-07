@@ -31,7 +31,7 @@ Business targets are batch choices. Ask whether the user wants a numerical targe
 
 ## 偏好版本与逐岗交付
 
-分配前读取 [偏好契约](../../references/preference-contract.md)。每份 assignment、role、delta 携带 preference_version；协调者拒收旧版本，先复用原 JD，只重查用户指定范围。独立偏好轴不得被参与者合成分数。交付需逐岗报告、JD 依据、就业/城市/方向、BU 未披露标记及执行状态；公司覆盖不足不得给实习候补或无正式岗结论。保留已投与明确选择，账号独占和串行写 Excel 继续生效。
+分配前读取 [偏好契约](../../references/preference-contract.md)。每份 assignment、role、delta 携带 preference_version；协调者拒收旧版本，先复用原 JD，只重查用户指定范围。独立偏好轴不得被参与者合成分数。交付需逐岗报告、JD 依据、就业/城市/方向、BU 未披露标记及执行状态；公司覆盖不足不得给无正式岗结论；转正实习可按 conversion_last 进入同一汇报末尾。保留已投与明确选择，账号独占和串行写 Excel 继续生效。
 
 ## Execute and reconcile
 
