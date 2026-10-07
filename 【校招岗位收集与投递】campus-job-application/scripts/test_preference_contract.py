@@ -241,6 +241,50 @@ class IntegrationTests(unittest.TestCase):
         r['pre_form_report_ref'] = 'synthetic-report'; a['preference_version'] = 'p1'
         self.assertTrue(any('stale assignment' in e for e in validator.validate(m)))
 
+    def history_manifest(self):
+        validator = load(ROOT/'skills/campus-job-parallel-search/scripts/validate_assignments.py')
+        r = role(); r.update(assignment_id='a', owner='one', stage='submitted',
+                             receipt_ref='synthetic-existing-receipt', material_id='synthetic-existing-material')
+        r['execution']['fill'] = {'status': 'complete', 'evidence_ref': 'synthetic-existing-fill'}
+        r['execution']['submit'] = {'status': 'complete', 'evidence_ref': 'synthetic-existing-receipt'}
+        prior = copy.deepcopy(r)
+        r['historical_readonly'] = True
+        r['current_batch_execution'] = {a: {'status': 'not_started'} for a in ['fill', 'save', 'submit']}
+        a = dict(assignment_id='a', company_key='synthetic-ats', source_scope='synthetic-plan',
+                 owner='one', output_dir='evidence/one/a', preference_version='p2')
+        manifest = dict(workflow='search', batch_id='synthetic', query_version='q2', mode='single',
+                 mode_approval_ref='synthetic-mode', execution_channel='manual_handoff', participants=['one'],
+                 coordinator='one', output_roots={'one':'evidence/one'}, source_hash='a'*64,
+                 assignment_version=1, assignments=[a], roles=[r], preferences=preferences(), prior_roles=[prior])
+        return validator, manifest
+
+    def test_search_preserves_submitted_history_without_resetting_execution(self):
+        validator, m = self.history_manifest()
+        before = copy.deepcopy(m)
+        self.assertEqual(validator.validate(m), [])
+        self.assertEqual(m, before)
+        m['deltas'] = [dict(batch_id='synthetic', query_version='q2', assignment_version=1,
+                           source_hash='a'*64, assignment_id='a', owner='one', preference_version='p2',
+                           roles=[copy.deepcopy(m['roles'][0])])]
+        self.assertEqual(validator.validate(m), [])
+
+    def test_search_historical_marker_cannot_authorize_new_actions(self):
+        for action in ['fill', 'save', 'submit']:
+            validator, m = self.history_manifest()
+            m['roles'][0]['current_batch_execution'][action] = {'status': 'in_progress', 'evidence_ref': 'synthetic-new'}
+            self.assertTrue(any('current-batch form actions' in e for e in validator.validate(m)))
+        validator, m = self.history_manifest()
+        m['prior_roles'] = []
+        self.assertTrue(any('requires prior submitted' in e for e in validator.validate(m)))
+
+    def test_search_historical_execution_and_receipt_cannot_be_rewritten(self):
+        for field, value in [('receipt_ref', 'synthetic-new-receipt'),
+                             ('execution', {a: {'status': 'not_started'} for a in ['fill', 'save', 'submit']})]:
+            validator, m = self.history_manifest(); m['roles'][0][field] = value
+            self.assertTrue(any('changed prior ' + field in e for e in validator.validate(m)))
+        validator, m = self.history_manifest(); m['prior_roles'][0].pop('execution')
+        self.assertTrue(any('execution snapshot' in e for e in validator.validate(m)))
+
     def test_research_progress_preserves_coverage_and_checks_new_contract(self):
         path = ROOT/'scripts/validate_research_progress.py'
         if not path.exists():

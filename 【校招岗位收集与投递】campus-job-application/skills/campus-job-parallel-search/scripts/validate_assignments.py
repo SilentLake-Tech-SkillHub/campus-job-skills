@@ -28,16 +28,32 @@ def within(path, root):
     return path == root or root in PurePosixPath(path).parents
 
 
-def search_only_errors(role):
+def not_started(execution):
+    return isinstance(execution, dict) and all(
+        execution.get(action) == {"status": "not_started"}
+        for action in ("fill", "save", "submit")
+    )
+
+
+def search_only_errors(role, prior_roles):
+    if role.get("historical_readonly") is True:
+        prior = next((item for item in prior_roles if isinstance(item, dict)
+                      and item.get("role_key") == role.get("role_key")), None) if isinstance(prior_roles, list) else None
+        if (prior is None or prior.get("stage") != "submitted"
+                or not text(prior.get("receipt_ref")) or not isinstance(prior.get("execution"), dict)):
+            return ["historical read-only role requires prior submitted receipt and execution snapshot"]
+        errors = []
+        for field in ("stage", "receipt_ref", "execution", "material_id", "review_hash",
+                      "approved_review_hash", "approval_ref", "selected", "selection_ref"):
+            if role.get(field) != prior.get(field):
+                errors.append("historical read-only role changed prior " + field)
+        if not not_started(role.get("current_batch_execution")):
+            errors.append("historical read-only role cannot perform current-batch form actions")
+        return errors
     errors = []
     if role.get("stage") not in {None, "discovered", "verified"}:
         errors.append("search role stage must remain discovered/verified (read-only)")
-    execution = role.get("execution")
-    if not isinstance(execution, dict) or any(
-        not isinstance(execution.get(action), dict)
-        or execution[action].get("status") != "not_started"
-        for action in ("fill", "save", "submit")
-    ):
+    if not not_started(role.get("execution")):
         errors.append("search role fill/save/submit must all remain not_started")
     return errors
 
@@ -140,7 +156,7 @@ def validate(data):
         if assignment is None or role.get("owner") != assignment.get("owner"):
             errors.append("role has unknown assignment or wrong owner")
         if WORKFLOW == "search":
-            errors.extend(search_only_errors(role))
+            errors.extend(search_only_errors(role, data.get("prior_roles")))
             if not text(role.get("jd_full_text")) or not text(role.get("jd_capture_ref")):
                 errors.append("search role needs full JD and capture reference")
         else:
@@ -186,7 +202,7 @@ def validate(data):
             if isinstance(delta["roles"], list):
                 for role in delta["roles"]:
                     if isinstance(role, dict):
-                        errors.extend(search_only_errors(role))
+                        errors.extend(search_only_errors(role, data.get("prior_roles")))
             errors.extend(_contract.validate_snapshot(data.get("preferences"), delta["roles"], assignments, []))
         if delta.get("merge_status") == "merged" and not text(delta.get("tracker_readback_ref")):
             errors.append("merged delta needs tracker readback")

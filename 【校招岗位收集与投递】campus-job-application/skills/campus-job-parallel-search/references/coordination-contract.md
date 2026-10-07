@@ -29,3 +29,7 @@ Delta acceptance and user reports also require the [progress contract](../../../
 ## 独立偏好与执行证据
 
 manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version 与当前确认版本一致。roles 按 [偏好契约](../../../references/preference-contract.md) 携带所有逐岗字段及 pre_form_report_ref、execution；仅搜索的 fill/save/submit 为 not_started。候补公司覆盖字段放 assignment；旧版本拒收，已投/选岗保护，用户指定复查范围外不重查。
+
+## 搜索中的只读历史保留
+
+本批新发现岗位保持 discovered/verified（或未填写 stage）及 execution 三项 not_started。保留既有已投岗位时使用 historical_readonly:true；原 stage/receipt_ref/execution/材料与审核确认身份不变，prior_roles 保存其完整执行快照以逐字段比对，另用 current_batch_execution 的 fill/save/submit 全 {status:not_started} 明确本批未操作。顶层和 delta 都校验此例外。没有完整历史快照的旧记录先保留原件并适配/人工核验，不能重置原提交证据、冒称历史或以历史标记授权新表单动作。

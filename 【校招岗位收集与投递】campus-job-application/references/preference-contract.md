@@ -35,3 +35,7 @@ Query、计划盘点、收集、Prepare、Review、续跑与 closeout 均读取�
 跨轴冲突在岗位上记录 `cross_axis_conflict: true`；选择/替代它需要 `selected: true` 与 `selection_ref`，否则仅展示且不执行表单。`prior_roles` 是私有上一快照的身份/`stage/receipt_ref/selected`；当前快照必须保留已投及明确选择，任何获明确新指令的更改留 `change_authorization_ref`。偏好更新本身不是这项授权。缺少旧版本字段或逐岗报告的历史增量先适配和人工复核，不能作为新完整交付接收。
 
 运行父流程列出的校验脚本检查新快照。它们是技能内结构校验工具，不是平台强制 hook、锁或真实网站验收；人工仍核验来源、覆盖、前置报告时间和旧记录完整性。
+
+## 搜索中的只读历史保留
+
+本批新发现岗位保持 discovered/verified（或未填写 stage）及 execution 三项 not_started。保留既有已投岗位时使用 historical_readonly:true；原 stage/receipt_ref/execution/材料与审核确认身份不变，prior_roles 保存其完整执行快照以逐字段比对，另用 current_batch_execution 的 fill/save/submit 全 {status:not_started} 明确本批未操作。顶层和 delta 都校验此例外。没有完整历史快照的旧记录先保留原件并适配/人工核验，不能重置原提交证据、冒称历史或以历史标记授权新表单动作。
