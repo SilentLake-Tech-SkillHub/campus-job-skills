@@ -1,7 +1,7 @@
 ---
 name: campus-job-plan-inventory
 metadata:
-  version: "1.1.0"
+  version: "1.1.1"
 description: Identify and inventory applicable campus-recruitment plans once per company during the first-pass sweep; after that sweep, investigate plan-relationship gaps only when the user selects them.
 ---
 
@@ -42,7 +42,7 @@ Use this Skill in two ordered stages. **Stage 1 first-pass sweep:** for each in-
 - Inspect the official JD for explicit conversion/retention wording (`实习转正`, `留用`, `转正机会`), target cohort, minimum duration/attendance and performance or other conditions. Hand off a candidate only when the target-family JD is in-scope and the official page explicitly states a conversion opportunity. The role remains an internship, is separately labeled `实习转正候选` in the role-table `备注`, and is never counted as a formal/full-time role or guaranteed conversion.
 - Ordinary internships without explicit conversion evidence remain out of scope. Ambiguous or inaccessible wording is recorded as unresolved/pending, not inferred. Track internship plan identity, cross-plan application relationship and limits separately; unknown remains unknown.
 
-Use one dedicated Chrome window per company. Keep that company's master, plan-filtered results and role pages inside it; do not repurpose another company's window. Keep useful pages open while the company investigation remains active. At its end, hand control to `campus-job-application`'s **Close a completed company window** gate: the Query-confirmed `信息收集` mode authorizes closing an agent-created, unprotected company window after recording its outcome; `准备投递` retains it. Protected or user-owned pages remain open. Capturing plan metadata does not authorize opening application forms, uploading a résumé, filling, submitting, or closing user pages.
+Use the parent Skill's [Chrome window grouping](../【校招岗位收集与投递】campus-job-application/references/chrome-window-grouping.md): at most 10 webpage tabs in an Agent-owned window, then create a new window for page 11. Companies may share a window; label every tab by company and never repurpose another company's tab or user window. Keep useful pages while active. At completion, apply the parent's **Close a completed company window** gate to the current company's tabs only; preserve shared-window neighbours, protected and user-owned pages. Inventory does not authorize application forms, uploads, filling or submission.
 
 ## Evidence and safety
 
