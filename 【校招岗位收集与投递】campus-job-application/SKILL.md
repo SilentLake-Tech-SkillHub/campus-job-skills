@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.4.1"
+  version: "1.4.2"
 ---
 
 # 校招职位刷新与投递协作
@@ -61,6 +61,10 @@ The workflow has two stages. **Stage 1 — first-pass sweep:** process every in-
 6. **Close non-priority tabs:** only after a reviewed batch has highlighted roles and the user has confirmed both the retained role list and the separate tab-closing action. This mode never fills or submits an application.
 
 Do not combine Open/filter with Record/fill unless the user has already selected the concrete roles. Open/filter **does include workbook role recording**; the separate Record-only mode is for user-selected existing tabs and never limits information-collection recording. Do not combine Record/fill with Submit in one authorization step unless the user has already reviewed the completed forms and explicitly approved those exact roles.
+
+## 任职资格门禁
+
+搜索筛选、取岗、准备、审核和续跑必须读取[岗位任职资格核对](references/eligibility-check.md)。按完整JD分别判断职责范围与个人资格，必需条件、优先条件及待解释条件分别记录；搜索交付资格结论与个人证据缺口，投递在进入表单前结合当前材料复核。缺证据标待核，不把“待投递”、标题或匹配分当作可投；明确冲突不默认推进，用户针对具体缺口以真实材料尝试的指令单独保留。用户已剔除、既有已投与明确选岗不重置，最终目标及表单版本仍审核。
 
 ## Match analysis
 
