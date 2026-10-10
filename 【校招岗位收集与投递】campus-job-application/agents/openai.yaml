@@ -1,7 +1,7 @@
 interface:
   display_name: "校招职位刷新与投递"
   short_description: "逐公司校招信息收集与双链接入表；选岗后再处理投递"
-  default_prompt: "使用 $campus-job-application 从工作簿中首轮尚无本届覆盖的下一家公司继续：按顺序完成首轮；部分盘点、受阻或待核关系不得自动重开。首轮结束后仅处理用户选定的具体缺口。核验公司和岗位来源并读回 Excel；默认使用内置浏览器，不可用时不自动切换；仅在明确选择Chrome时采用每窗口10页规则，信息收集后只清理已读回且未受保护的本公司标签页，不填写或提交申请。"
+  default_prompt: "使用 $campus-job-application 从工作簿中首轮尚无本届覆盖的下一家公司继续：按顺序完成首轮；部分盘点、受阻或待核关系不得自动重开。首轮结束后仅处理用户选定的具体缺口。核验公司和岗位来源并读回 Excel；按内置浏览器→Chrome＋computer use→Playwright框架的顺序使用，每次降级先说明原因并取得用户确认；仅在明确选择Chrome时采用每窗口10页规则，信息收集后只清理已读回且未受保护的本公司标签页，不填写或提交申请。"
 
 policy:
   allow_implicit_invocation: true
