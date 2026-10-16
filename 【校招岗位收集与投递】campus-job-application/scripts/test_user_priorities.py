@@ -38,3 +38,7 @@ class UserPriorityTests(CompanyHandoffTests):
     def test_user_order_evidence_tamper_blocks(self):
         self.approve();(self.root/'priority-confirm.md').write_text('changed',encoding='utf-8')
         self.assertIn('用户志愿确认依据已变化',h.check(self.book,self.batch))
+
+
+if __name__=='__main__':
+    unittest.main()
