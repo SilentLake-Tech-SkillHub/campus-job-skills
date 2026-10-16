@@ -39,7 +39,7 @@ def search_round_check(batch_id:str)->dict:
 
 @server.tool()
 def search_round_advance(batch_id:str)->dict:
-    """Advance only after every company in current research round passed checks; never grants user approval."""
+    """Advance after every company has evidence and a check outcome; carry unresolved items without marking them passed. Never grants user approval."""
     return queue().advance(batch_id)
 
 

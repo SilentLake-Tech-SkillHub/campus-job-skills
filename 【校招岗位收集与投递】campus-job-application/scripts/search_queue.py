@@ -136,7 +136,9 @@ class Queue:
                 import company_handoff as h
                 c=json.loads(self.ref(e['company_payload_ref']).read_text(encoding='utf-8'))
                 if c['company_key']!=t['company']:raise ValueError('Company payload mismatch')
-                errors=h.validate_company(c)+h.validate_research(c,True)
+                # A structured unknown stays unknown; research and user-confirmation
+                # readiness are checked separately by the application handoff gate.
+                errors=h.validate_company(c)+h.validate_research(c)
                 if errors:raise ValueError('; '.join(errors))
                 if not any(a['path']==e['company_payload_ref'] for a in artifacts):raise ValueError('Company payload must be hashed')
             status='checked' if all(e['checks'].values()) and not e['gaps'] else 'blocked'
@@ -163,8 +165,8 @@ class Queue:
         result={'batch_id':batch,'stage':b['stage'],'operation':STAGES[b['stage']-1],
                 'companies':len(tasks),'counts':counts,'issues':issues,
                 'passed':counts['checked']==len(tasks) and not issues,
+                'audited':counts['pending']==0 and counts['running']==0 and not issues,
                 'unresolved':[{'task_id':t['id'],'company_key':t['company'],'status':t['status'],'gap':t['gap']} for t in tasks if t['status']!='checked']}
-        report=self.root/'round-checks'/f'{batch}-stage-{b["stage"]}.json'
         # Batch identity is data, never a path segment.
         report=self.root/'round-checks'/(hashlib.sha256(batch.encode()).hexdigest()[:16]+f'-{b["stage"]}.json')
         report.parent.mkdir(parents=True,exist_ok=True)
@@ -175,14 +177,18 @@ class Queue:
 
     def advance(self,batch):
         result=self.check(batch)
-        if not result['passed']:raise ValueError('Round incomplete; independent pending companies may continue')
+        if not result['audited']:raise ValueError('Round not fully checked; independent pending companies may continue')
         with self.db() as db:
             stage=db.execute('SELECT stage FROM batches WHERE id=?',(batch,)).fetchone()['stage']
             if stage!=result['stage']:raise ValueError('Round changed concurrently')
             if stage>=4:raise ValueError('Research stages finished; workbook write and user HTML review remain separate gates')
             db.execute('UPDATE batches SET stage=stage+1 WHERE id=?',(batch,))
-            self.event(db,batch,'advance',{'from':stage,'to':stage+1})
-        return self.check(batch)
+            self.event(db,batch,'advance',{'from':stage,'to':stage+1,'unresolved_carried':result['counts']['blocked'],'check_report':result['report_ref']})
+        following=self.check(batch)
+        following['previous_round_blocked']=result['counts']['blocked']
+        following['previous_round_passed']=result['passed']
+        following['previous_round_report_ref']=result['report_ref']
+        return following
 
     def retry(self,batch,task_id,reason):
         if not reason.strip():raise ValueError('Recovery evidence/reason required')

@@ -84,6 +84,17 @@ class SearchQueueTests(unittest.TestCase):
         m=copy.deepcopy(self.manifest);m['scope']={'region':'changed'}
         with self.assertRaises(ValueError):self.q.create(m)
 
+    def test_all_outcomes_checked_carry_blockers_without_claiming_pass(self):
+        while True:
+            jobs=self.q.dispatch('synthetic')['assignments']
+            if not jobs:break
+            for a in jobs:self.record(a,gaps=['Source does not disclose current cycle'])
+        checked=self.q.check('synthetic')
+        self.assertTrue(checked['audited']);self.assertFalse(checked['passed'])
+        result=self.q.advance('synthetic')
+        self.assertEqual(result['stage'],2);self.assertEqual(result['previous_round_blocked'],3)
+        self.assertFalse(result['previous_round_passed'])
+
     def test_real_mcp_stdio_protocol(self):
         from search_mcp_client import call
         with patch.dict(os.environ,{'CAMPUS_SEARCH_PRIVATE_DIR':str(self.root)}):
