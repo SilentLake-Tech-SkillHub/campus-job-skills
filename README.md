@@ -1,6 +1,6 @@
 # campus-job-skills
 
-**当前主 Skill：v1.5.0 · 2026-10-16**
+**当前主 Skill：v1.5.1 · 2026-10-16**
 
 ## 本次更新：投递前先核对整家公司
 
@@ -16,9 +16,13 @@
 
 ![公司HTML核对页（合成场景）](docs/images/company-review-synthetic.png)
 
+支持先整理 UTF-8 草稿 JSON，再写入 Excel 并读回生成 JSON/HTML；文件保存在私有工作簿旁的 `岗位交接/<批次>/`。手动修改 Excel 后需重新导出，投递端会阻断陈旧快照。
+
 图中是工具实际生成的合成测试页面，用于展示格式，不代表真实公司核验或用户批准。完整契约及命令见[公司核对与交接](【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)。
 
 ## 更新日志
+
+- **v1.5.1 · 2026-10-16**：修复 Windows 默认编码下中文 JSON/HTML 读写失败；增加非 UTF-8 默认编码往返测试。支持先整理草稿 JSON 再写 Excel，并明确私有存储路径与手动刷新职责。[Issue #12](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills/issues/12)
 
 - **v1.5.0 · 2026-10-16**：完整计划与岗位目录；三档候选、推荐和用户选择分开；公司/计划/轮次/BU/共享名额、冷冻期规则矩阵；内推查证前移；HTML确认与Excel/JSON同步；新增导出、确认绑定与投递接收校验。[Issue #12](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills/issues/12)
 - 配套版本：计划盘点 v1.2.0、偏好确认 v1.3.0、并行搜索 v1.2.0、内推码 v1.1.0。
