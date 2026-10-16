@@ -4,6 +4,8 @@
 
 MCP 管理持久化任务、两个通道的独占租约、公司／共享来源互斥、证据收回和分轮检查。实际网页由宿主现有浏览器 MCP 执行器操作，MCP 不伪装成本地程序直接拥有内置浏览器。`search_dispatch` 返回的两个任务应并发交给 Chrome/IAB 执行，不是连续调用或同一公司双重抓取。派发成功不等于访问成功。工具接口与宿主桥接、当前服务注册、真实双通道执行必须分别验证。
 
+此服务也承接[完整数据处理与用户核对](recruiting-data-mcp.md)：初始化 Excel/JSON 快速展开、结构化草稿保存、固定脚本写 Excel、全量/批次 JSON 同步、固定 HTML 生成、用户调整及明确确认。数据接口与下方搜索队列接口并列；搜索轮次推进不自动写表或确认。
+
 ## 调用闭环
 
 1. `search_batch_create(manifest)` 冻结 batch_id、scope、authorization_ref、workbook_sha256、companies。companies 每项保存 company_key、name、source_key（相同官方来源范围使用相同键），可带已观察入口和证据索引。授权文件须存在于私有目录。不得把历史初次访问误归作新首轮；本批可执行的明确补查范围写入 scope。

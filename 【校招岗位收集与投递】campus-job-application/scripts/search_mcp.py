@@ -3,8 +3,71 @@
 import os
 from mcp.server.fastmcp import FastMCP
 from search_queue import Queue
+from recruiting_data import RecruitingData
 
-server=FastMCP('campus-search',instructions='Dispatch independent company tasks to chrome and iab concurrently through the host browser MCP. Record actual browser evidence. No login, application, filling or submission. Run round checks before advancing; company HTML confirmation remains separate.')
+server=FastMCP('campus-search',instructions='Coordinate the recruiting research and data workflow: dual-browser search, private structured JSON drafts, version-bound Excel updates/readback, complete JSON and fixed HTML review exports, explicit user confirmation and handoff checks. No login, application, filling or submission. Initialization, research completion and user confirmation are distinct. Respect the approved batch write timing.')
+
+
+def data_store():
+    workspace=os.environ.get('CAMPUS_RECRUITING_WORKSPACE')
+    private=os.environ.get('CAMPUS_SEARCH_PRIVATE_DIR')
+    if not workspace or not private:
+        raise ValueError('数据接口需要配置CAMPUS_RECRUITING_WORKSPACE及私有目录')
+    return RecruitingData(workspace,private)
+
+
+@server.tool()
+def recruiting_data_open(workbook:str,batch:str)->dict:
+    """Quickly expand workbook/JSON status and structured schema; no Excel mutation."""
+    return data_store().open(workbook,batch)
+
+
+@server.tool()
+def recruiting_data_query(workbook:str,company:str|None=None,sheet:str|None=None,offset:int=0,limit:int=30)->dict:
+    """Read a company or sheet from synchronized full JSON with pagination."""
+    return data_store().query(workbook,company,sheet,offset,limit)
+
+
+@server.tool()
+def recruiting_draft_put(workbook:str,batch:str,data:dict)->dict:
+    """Save an immutable structured exchange draft; does not mark facts or user approval verified."""
+    return data_store().draft_put(workbook,batch,data)
+
+
+@server.tool()
+def recruiting_draft_get(workbook:str,batch:str,draft_ref:str,draft_sha256:str)->dict:
+    """Read the exact hashed draft bound to this workbook and batch."""
+    return data_store().draft(workbook,batch,draft_ref,draft_sha256)
+
+
+@server.tool()
+def recruiting_data_initialize(workbook:str,batch:str,sheet:str,scope:str,expected_sha256:str,company:str|None=None)->dict:
+    """Initialize research tables through fixed code only at the batch-authorized write stage."""
+    return data_store().initialize(workbook,batch,sheet,scope,expected_sha256,company)
+
+
+@server.tool()
+def recruiting_data_commit(workbook:str,batch:str,draft_ref:str,draft_sha256:str,expected_sha256:str)->dict:
+    """Validate and commit a draft to Excel, read back and refresh full/batch JSON and fixed HTML."""
+    return data_store().commit(workbook,batch,draft_ref,draft_sha256,expected_sha256)
+
+
+@server.tool()
+def recruiting_review_refresh(workbook:str,batch:str,expected_sha256:str)->dict:
+    """Export all existing batches and fixed HTML from current Excel; never import an old snapshot."""
+    return data_store().refresh(workbook,batch,expected_sha256)
+
+
+@server.tool()
+def recruiting_review_confirm(workbook:str,batch:str,company_key:str,evidence_ref:str,html_sha256:str,expected_sha256:str)->dict:
+    """Record existing explicit user approval of exact HTML; enforce research/ranking evidence. No application authority."""
+    return data_store().confirm(workbook,batch,company_key,evidence_ref,html_sha256,expected_sha256)
+
+
+@server.tool()
+def recruiting_handoff_check(workbook:str,batch:str,url:str|None=None)->dict:
+    """Check Excel/full JSON/batch JSON/HTML and user approval before handoff; never submit."""
+    return data_store().check(workbook,batch,url)
 
 
 def queue():
