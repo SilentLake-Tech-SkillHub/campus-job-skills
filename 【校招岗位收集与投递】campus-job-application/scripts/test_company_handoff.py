@@ -55,6 +55,9 @@ class CompanyHandoffTests(unittest.TestCase):
  def test_missing_rule_dimension(self):
   self.c['rules']=self.c['rules'][:-1]
   with self.assertRaises(ValueError):self.draft()
+ def test_per_bu_scope_cannot_omit_other_candidates(self):
+  next(x for x in self.c['rules'] if x['dimension']=='bu')['role_ids']=['r1']
+  with self.assertRaises(ValueError):self.draft()
  def test_missing_referral(self):
   self.c['referrals']=[]
   with self.assertRaises(ValueError):self.draft()

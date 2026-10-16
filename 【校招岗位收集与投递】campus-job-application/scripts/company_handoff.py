@@ -159,6 +159,10 @@ def validate_company(c):
  if len(orders)!=len(set(orders)):errors.append('选岗顺序重复')
  dimensions={r['dimension'] for r in c['rules']}
  if not DIMENSIONS<=dimensions:errors.append('规则维度缺失: '+','.join(sorted(DIMENSIONS-dimensions)))
+ for role in c['roles']:
+  if role['tier'] in ('exact','partial','special'):
+   for dimension in DIMENSIONS:
+    if not any(rule['dimension']==dimension and (not rule['role_ids'] or role['id'] in rule['role_ids']) for rule in c['rules']):errors.append('候选缺适用规则: '+role['id']+'/'+dimension)
  for rule in c['rules']:
   need(rule,['id','scope','status','text','source','checked_at'],'规则')
   if rule['status'] not in ('verified','unknown','not_applicable'):errors.append('规则状态无效')
