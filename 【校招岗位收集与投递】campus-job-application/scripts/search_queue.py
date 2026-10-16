@@ -9,6 +9,7 @@ import time
 import uuid
 
 CHANNELS=('chrome','iab')
+DEFAULT_COMPANIES_PER_CHANNEL=10
 STAGES=('collection','verification','structuring','recommendation')
 CHECKS={1:{'company_identity','cohort','plans_enumerated','catalog_pages_enumerated','counts_reconciled','source_saved'},
         2:{'plans','catalog','jd','eligibility','rules','referrals','preferences'},
@@ -76,31 +77,35 @@ class Queue:
             self.event(db,batch,'create',{'companies':len(ids),'channels':CHANNELS})
         return {'batch_id':batch,'created':True,'companies':len(ids),'execution_batches':(len(ids)+9)//10}
 
-    def dispatch(self,batch,channels=CHANNELS,lease_seconds=900):
+    def dispatch(self,batch,channels=CHANNELS,lease_seconds=900,companies_per_channel=DEFAULT_COMPANIES_PER_CHANNEL):
         if not channels or len(set(channels))!=len(channels) or not set(channels)<=set(CHANNELS):
             raise ValueError('Channels must be distinct chrome/iab')
         if type(lease_seconds)!=int or not 30<=lease_seconds<=3600:raise ValueError('Invalid lease duration')
+        if type(companies_per_channel)!=int or not 1<=companies_per_channel<=10:
+            raise ValueError('Company concurrency per channel must be an integer from 1 to 10')
         assignments=[]
         with self.db() as db:
             b=db.execute('SELECT * FROM batches WHERE id=?',(batch,)).fetchone()
             if not b:raise ValueError('Unknown batch')
             db.execute("UPDATE tasks SET status='blocked',gap='Lease expired; inspect existing page/evidence before explicit retry' WHERE batch=? AND status='running' AND expires<?",(batch,time.time()))
             manifest=json.loads(b['manifest']);index={c['company_key']:c for c in manifest['companies']}
-            for channel in channels:
-                if db.execute("SELECT 1 FROM tasks WHERE batch=? AND channel=? AND status='running'",(batch,channel)).fetchone():continue
-                task=db.execute("""SELECT * FROM tasks t WHERE batch=? AND stage=? AND status='pending'
-                  AND NOT EXISTS(SELECT 1 FROM tasks a WHERE a.batch=t.batch AND a.source_key=t.source_key AND a.status='running')
-                  ORDER BY position LIMIT 1""",(batch,b['stage'])).fetchone()
-                if not task:continue
-                token=str(uuid.uuid4());expires=time.time()+lease_seconds
-                db.execute("UPDATE tasks SET status='running',channel=?,token=?,expires=? WHERE id=?",(channel,token,expires,task['id']))
-                assignments.append({'task_id':task['id'],'lease_token':token,'channel':channel,
-                    'stage':task['stage'],'operation':STAGES[task['stage']-1],
-                    'company':index[task['company']],'scope':manifest['scope'],
-                    'execution_batch':task['position']//10+1,'expires':expires,
-                    'browser_executor':'host_browser_mcp','application_actions':'forbidden'})
+            for slot in range(companies_per_channel):
+                for channel in channels:
+                    if db.execute("SELECT COUNT(*) FROM tasks WHERE batch=? AND channel=? AND status='running'",(batch,channel)).fetchone()[0]>=companies_per_channel:continue
+                    task=db.execute("""SELECT * FROM tasks t WHERE batch=? AND stage=? AND status='pending'
+                      AND NOT EXISTS(SELECT 1 FROM tasks a WHERE a.batch=t.batch AND a.source_key=t.source_key AND a.status='running')
+                      ORDER BY position LIMIT 1""",(batch,b['stage'])).fetchone()
+                    if not task:continue
+                    token=str(uuid.uuid4());expires=time.time()+lease_seconds
+                    db.execute("UPDATE tasks SET status='running',channel=?,token=?,expires=? WHERE id=?",(channel,token,expires,task['id']))
+                    assignments.append({'task_id':task['id'],'lease_token':token,'channel':channel,
+                        'stage':task['stage'],'operation':STAGES[task['stage']-1],
+                        'company':index[task['company']],'scope':manifest['scope'],
+                        'execution_batch':task['position']//10+1,'expires':expires,
+                        'browser_executor':'host_browser_mcp','application_actions':'forbidden'})
             self.event(db,batch,'dispatch',assignments)
         return {'batch_id':batch,'assignments':assignments,'concurrency':len(assignments),
+                'company_capacity_per_channel':companies_per_channel,'capacity_unit':'company',
                 'execution_required':True,'note':'Assignments do not prove browser execution or verified coverage'}
 
     def record(self,batch,task_id,lease_token,evidence_ref):

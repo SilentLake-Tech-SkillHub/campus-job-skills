@@ -83,9 +83,9 @@ def search_batch_create(manifest:dict)->dict:
 
 
 @server.tool()
-def search_dispatch(batch_id:str,channels:list[str]=['chrome','iab'],lease_seconds:int=900)->dict:
-    """Atomically assign up to two independent tasks; host executes both browser calls concurrently."""
-    return queue().dispatch(batch_id,channels,lease_seconds)
+def search_dispatch(batch_id:str,channels:list[str]=['chrome','iab'],lease_seconds:int=900,companies_per_channel:int=10)->dict:
+    """Assign up to ten companies per browser by default; jobs/plans share their company lease. Host must execute browser calls."""
+    return queue().dispatch(batch_id,channels,lease_seconds,companies_per_channel)
 
 
 @server.tool()

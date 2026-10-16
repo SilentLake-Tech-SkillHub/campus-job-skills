@@ -2,14 +2,14 @@
 
 用户明确选择 Chrome 与内置浏览器并发时使用此入口；这是同一执行者的两个浏览器通道，不自动授权创建多个 AI 或改变申请权限。批次未作该选择时沿用已确认方式。搜索 MCP 通过 `scripts/search_mcp.py` 提供 stdio 工具，依赖见 `scripts/search-mcp-requirements.txt`。私有目录通过 `CAMPUS_SEARCH_PRIVATE_DIR` 设置，禁止写入公开包。
 
-MCP 管理持久化任务、两个通道的独占租约、公司／共享来源互斥、证据收回和分轮检查。实际网页由宿主现有浏览器 MCP 执行器操作，MCP 不伪装成本地程序直接拥有内置浏览器。`search_dispatch` 返回的两个任务应并发交给 Chrome/IAB 执行，不是连续调用或同一公司双重抓取。派发成功不等于访问成功。工具接口与宿主桥接、当前服务注册、真实双通道执行必须分别验证。
+MCP 管理持久化任务、两个通道中各公司的独占租约、公司／共享来源互斥、证据收回和分轮检查。实际网页由宿主现有浏览器 MCP 执行器操作，MCP 不伪装成本地程序直接拥有内置浏览器。`search_dispatch` 返回的公司任务应并发交给 Chrome/IAB 执行，不是连续调用或同一公司双重抓取。派发成功不等于访问成功。工具接口与宿主桥接、当前服务注册、真实双通道执行必须分别验证。
 
 此服务也承接[完整数据处理与用户核对](recruiting-data-mcp.md)：初始化 Excel/JSON 快速展开、结构化草稿保存、固定脚本写 Excel、全量/批次 JSON 同步、固定 HTML 生成、用户调整及明确确认。数据接口与下方搜索队列接口并列；搜索轮次推进不自动写表或确认。
 
 ## 调用闭环
 
 1. `search_batch_create(manifest)` 冻结 batch_id、scope、authorization_ref、workbook_sha256、companies。companies 每项保存 company_key、name、source_key（相同官方来源范围使用相同键），可带已观察入口和证据索引。授权文件须存在于私有目录。不得把历史初次访问误归作新首轮；本批可执行的明确补查范围写入 scope。
-2. `search_dispatch(batch_id, channels=["chrome","iab"])` 原子领取最多两个独立任务，保存 task_id、lease_token、company、channel、stage、期限。两个通道各自执行，其等待互不阻塞；同一公司／来源不能同时被领取。租约过期转受阻，不自动重试原页。
+2. `search_dispatch(batch_id, channels=["chrome","iab"], companies_per_channel=10)` 默认每通道原子领取至多十家公司，双通道合计至多二十家。参数可降低为一至十家，已有运行租约占用公司名额，后续调用只补空缺；同公司多个计划、岗位和详情页共用公司租约，不能每岗再领取公司任务。公司并发与页面数量、每十家公司业务检查小批分别计数。保存独立任务，保存 task_id、lease_token、company、channel、stage、期限。各公司在指定通道内执行，其等待互不阻塞；同一公司／来源不能同时被领取。租约过期转受阻，不自动重试原页。
 3. 将 DOM/截图或结构化来源原文保存到私有目录。证据 JSON 含 task_id、company_key、channel、stage、observed_at、source_urls、observations、artifacts（path/sha256）、checks、gaps。gaps 是阻止本轮验收的未完成工作；已研究但未披露的规则另明确记 unknown 与来源，不冒充未开展研究。第一轮通过还须 inventory.plans/roles 的完整名称目录、各记录 id、岗位 plan_ids 和 expected_plans/expected_roles，数量须相等。网页真实性与覆盖充分性由执行者逐项核验，不能用 true 代替未执行的检查。
 4. `search_result_record` 只接受活跃租约对应公司和通道的实际证据，验证文件 Hash、必要检查和计数。第三／四轮还须 company_payload_ref，指向按公司交接协议填写并校验的公司对象，列入 artifacts。不得直接并发写 Excel。
 5. `search_round_check` 输出计数、前若干个异常和完整检查文件路径。四个研究轮次依次为 collection、verification、structuring、recommendation。`audited` 表示本轮每个任务已有真实证据及检查结论，`passed` 表示全部核验通过，两者独立。`search_round_advance` 仅在 audited 后推进，保留上一轮报告及具体阻塞数，不把受阻公司改成已通过；下一轮继续各项独立可做工作。第三／四轮允许将明确未知与缺口结构化，不能因缺口阻断所有数据整理；公司是否可交接仍由 company_handoff 的完整研究与用户确认门禁判断。任务小批按公司原序每十家分组；小批数量不改变真实业务覆盖要求。

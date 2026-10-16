@@ -35,7 +35,7 @@ class SearchQueueTests(unittest.TestCase):
 
     def test_two_concurrent_dispatchers_do_not_duplicate(self):
         with ThreadPoolExecutor(2) as pool:
-            groups=list(pool.map(lambda _:Queue(self.root).dispatch('synthetic'),range(2)))
+            groups=list(pool.map(lambda _:Queue(self.root).dispatch('synthetic',companies_per_channel=1),range(2)))
         jobs=[a for group in groups for a in group['assignments']]
         self.assertEqual(len(jobs),2);self.assertEqual(len({a['task_id'] for a in jobs}),2)
         self.assertEqual({a['channel'] for a in jobs},{'iab','chrome'})
@@ -46,32 +46,32 @@ class SearchQueueTests(unittest.TestCase):
         self.q.create(m);self.assertEqual(len(self.q.dispatch('aliases')['assignments']),1)
 
     def test_blocker_does_not_stop_independent_channel(self):
-        a,b=self.q.dispatch('synthetic')['assignments']
+        a,b=self.q.dispatch('synthetic',companies_per_channel=1)['assignments']
         self.assertEqual(self.record(a,gaps=['Unavailable source'])['status'],'blocked')
-        c=self.q.dispatch('synthetic')['assignments'][0]
+        c=self.q.dispatch('synthetic',companies_per_channel=1)['assignments'][0]
         self.assertEqual(c['channel'],a['channel']);self.assertNotEqual(c['task_id'],b['task_id'])
         with self.assertRaises(ValueError):self.q.advance('synthetic')
 
     def test_stale_and_duplicate_delivery_rejected(self):
-        a=self.q.dispatch('synthetic')['assignments'][0];self.record(a)
+        a=self.q.dispatch('synthetic',companies_per_channel=1)['assignments'][0];self.record(a)
         with self.assertRaises(ValueError):self.record(a)
 
     def test_expired_lease_no_automatic_retry(self):
-        a=self.q.dispatch('synthetic',['chrome'],30)['assignments'][0]
+        a=self.q.dispatch('synthetic',['chrome'],30,companies_per_channel=1)['assignments'][0]
         with patch('search_queue.time.time',return_value=a['expires']+1):
             with self.assertRaises(ValueError):self.record(a)
-            self.q.dispatch('synthetic',['chrome'])
+            self.q.dispatch('synthetic',['chrome'],companies_per_channel=1)
         self.assertEqual(self.q.check('synthetic')['counts']['blocked'],1)
         self.q.retry('synthetic',a['task_id'],'Original tab inspected and source recovered')
 
     def test_wrong_channel_and_count_mismatch(self):
-        a=self.q.dispatch('synthetic')['assignments'][0]
+        a=self.q.dispatch('synthetic',companies_per_channel=1)['assignments'][0]
         for extra in [{'channel':'wrong'},{'inventory':{'plans':[],'roles':[],'expected_plans':2,'expected_roles':0}}]:
             with self.assertRaises(ValueError):self.record(a,**extra)
 
     def test_round_complete_and_capture_tamper(self):
         while True:
-            jobs=self.q.dispatch('synthetic')['assignments']
+            jobs=self.q.dispatch('synthetic',companies_per_channel=1)['assignments']
             if not jobs:break
             for a in jobs:self.record(a)
         self.assertTrue(self.q.check('synthetic')['passed'])
@@ -86,7 +86,7 @@ class SearchQueueTests(unittest.TestCase):
 
     def test_all_outcomes_checked_carry_blockers_without_claiming_pass(self):
         while True:
-            jobs=self.q.dispatch('synthetic')['assignments']
+            jobs=self.q.dispatch('synthetic',companies_per_channel=1)['assignments']
             if not jobs:break
             for a in jobs:self.record(a,gaps=['Source does not disclose current cycle'])
         checked=self.q.check('synthetic')
@@ -95,10 +95,36 @@ class SearchQueueTests(unittest.TestCase):
         self.assertEqual(result['stage'],2);self.assertEqual(result['previous_round_blocked'],3)
         self.assertFalse(result['previous_round_passed'])
 
+
+    def test_default_twenty_companies_and_atomic_refill(self):
+        m=copy.deepcopy(self.manifest);m['batch_id']='capacity'
+        m['companies']=[{'company_key':str(i),'name':'Synthetic '+str(i),'source_key':str(i)} for i in range(25)]
+        self.q.create(m)
+        with ThreadPoolExecutor(2) as pool:
+            results=list(pool.map(lambda _:Queue(self.root).dispatch('capacity'),range(2)))
+        assignments=[a for result in results for a in result['assignments']]
+        self.assertEqual(len(assignments),20)
+        self.assertEqual(len({a['company']['company_key'] for a in assignments}),20)
+        for channel in ('chrome','iab'):
+            self.assertEqual(sum(a['channel']==channel for a in assignments),10)
+        self.assertEqual(self.q.dispatch('capacity')['assignments'],[])
+        a=assignments[0]
+        self.q.record('capacity',a['task_id'],a['lease_token'],self.evidence(a))
+        refill=self.q.dispatch('capacity')['assignments']
+        self.assertEqual(len(refill),1);self.assertEqual(refill[0]['channel'],a['channel'])
+        self.assertNotEqual(refill[0]['company']['company_key'],a['company']['company_key'])
+
+    def test_company_capacity_validation(self):
+        for value in (0,11,True,'10'):
+            with self.assertRaises(ValueError):
+                self.q.dispatch('synthetic',companies_per_channel=value)
+
     def test_real_mcp_stdio_protocol(self):
         from search_mcp_client import call
         with patch.dict(os.environ,{'CAMPUS_SEARCH_PRIVATE_DIR':str(self.root)}):
             tools=asyncio.run(call({'method':'tools/list'}))
             self.assertIn('search_dispatch',{t['name'] for t in tools['tools']})
             result=asyncio.run(call({'tool':'search_dispatch','arguments':{'batch_id':'synthetic'}}))
-            self.assertEqual(len(result['assignments']),2)
+            self.assertEqual(len(result['assignments']),3)
+            self.assertEqual(result['capacity_unit'],'company')
+            self.assertEqual(result['company_capacity_per_channel'],10)
