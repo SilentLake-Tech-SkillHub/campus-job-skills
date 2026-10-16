@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.6.0"
+  version: "1.7.0"
 ---
 
 # 校招职位刷新与投递协作
@@ -14,6 +14,10 @@ Use this Skill only inside a job-search workspace that has the project's job-sea
 每轮搜索、续跑、交付和转投递先读取[公司机会核对与交接](references/company-review-handoff.md)。搜索端负责全部适用计划、计划内完整岗位名称目录、三档候选及完整 JD、最终推荐、轮次/公司/BU/共享名额与冷冻期、内推码查证。先保存 Excel，再生成 HTML 给用户核对；用户完整确认的最终选择写回 Excel，并导出同版本 JSON。每次刷新两份文件一起更新；未确认、不同步或不在最终选择中的岗位不可进入表单。
 
 这一交接要求适用于下方所有模式；旧 Record/fill、Submit 只作为转交入口，不在搜索 Skill 内执行申请。收集范围与申请资格分别判断，用户的软偏好不裁剪完整岗位名称目录；全部目录不等于全部可投。
+
+用户已确认双浏览器并发搜索时，先读取[搜索 MCP 与双通道](references/search-mcp.md)，使用持久任务队列同时派发 Chrome 和内置浏览器的不同公司任务，收回实际证据并执行逐轮检查。此分支替代下方的默认浏览器降级顺序；一个通道失败不停止另一个独立任务，也不自动创建多个 AI。未完成、未核及租约过期均单独记录。按信息收集、核验整理、结构化、筛选推荐、用户核对推进，每轮检查数量、关系、重复、冲突与证据。用户规定全表核验后统一写入时遵守该时机，期间只存私有证据和草稿。
+
+所有公司均须由用户确认投递岗位志愿顺序：不分 BU 按公司成组；分 BU 各 BU 独立成组；分组机制未知明确待核。记录在独立 `user_priorities`／“用户志愿”表，不能用官网 preferences、Agent 推荐或 roles.order 代替。官网平行或无志愿机制仍保留用户自身顺序，已选岗位未经确认不可交接。
 
 ## Execution-mode Query
 
@@ -163,4 +167,4 @@ This is the standing row-organization logic for every regional role sheet listed
 
 ## 数据建设闭环
 
-执行[数据建设与固定脚本](references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、八张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。
+执行[数据建设与固定脚本](references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、九张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。

@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from structured_dimensions import EXTRA_FIELDS, LIST_FIELDS as DIMENSION_LISTS, NULL_FIELDS, applies, validate as validate_dimensions
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
+from user_priorities import FIELDS as PRIORITY_FIELDS, validate as validate_priorities, evidence_errors as priority_evidence_errors
 
 SCHEMA = {
  'company': ('公司核对', [('company_key','公司键'),('name','公司'),('version','版本'),('scope','本批需求'),('coverage','覆盖状态'),('gaps','覆盖缺口'),('checked_at','核验时间'),('recommendation_reason','推荐理由'),('confirmation_ref','确认依据'),('confirmation_sha256','确认文件哈希'),('confirmed_at','确认时间'),('confirmed_digest','确认数据摘要'),('reviewed_html_sha256','已审核HTML哈希')]),
@@ -29,6 +30,7 @@ SCHEMA.update({
  'research': ('研究检查', [('id','检查项'),('status','完成状态'),('source','来源'),('checked_at','核验时间'),('gap','待补事项'),('expected_count','应有数量'),('observed_count','实际数量')]),
 })
 for kind, fields in EXTRA_FIELDS.items():SCHEMA[kind][1].extend(fields)
+SCHEMA['user_priorities']=('用户志愿',PRIORITY_FIELDS)
 RESEARCH_ITEMS = {'plans','catalog','jd','eligibility','rules','referrals','preferences'}
 DIMENSIONS = {'company','plan','round','bu','shared','concurrent','cooldown','change','preference'}
 CONFIRM_FIELDS = {'confirmation_ref','confirmation_sha256','confirmed_at','confirmed_digest','reviewed_html_sha256'}
@@ -72,7 +74,7 @@ def read(book,batch,allow_legacy=False):
  wb=load_workbook(book,data_only=False);companies={}
  for kind,(sheet,fields) in SCHEMA.items():
   if sheet not in wb:
-   if allow_legacy and kind in ('preferences','research','conditions'):continue
+   if allow_legacy and kind in ('preferences','research','conditions','user_priorities'):continue
    raise ValueError('缺少公司交接工作表: '+sheet)
   ws=wb[sheet]
   actual=[c.value for c in ws[1]]
@@ -166,7 +168,7 @@ def validate_company(c):
  plans={p['id']:p for p in c['plans']};ids={r['id'] for r in c['roles']}
  urls=[r['url'] for r in c['roles'] if r['url']]
  if len(urls)!=len(set(urls)):errors.append('同一岗位直链重复，须合并计划关系')
- for section in ('plans','roles','rules','referrals','preferences','research','conditions'):
+ for section in ('plans','roles','rules','referrals','preferences','research','conditions','user_priorities'):
   values=[x.get('id') for x in c[section]]
   if len(values)!=len(set(values)):errors.append(section+' ID重复')
  for p in c['plans']:
@@ -226,7 +228,9 @@ def validate_company(c):
 
 
 def validate_research(c,ready=False):
- errors=validate_dimensions(c,True) if ready else [];roles={r['id']:r for r in c['roles']}
+ errors=validate_priorities(c,ready)
+ if ready:errors+=validate_dimensions(c,True)
+ roles={r['id']:r for r in c['roles']}
  tasks={r['id']:r for r in c.get('research',[])}
  if set(tasks)!=RESEARCH_ITEMS:errors.append('研究检查必须覆盖计划、目录、JD、资格、规则、内推、志愿')
  for task in tasks.values():
@@ -307,6 +311,11 @@ def render(companies,batch):
    for r in c['roles']:
     if r['tier']==tier:parts+=['<details open><summary>'+esc(r['title'])+'</summary>'+table([{'label':t,'value':val(r[k])} for k,t in SCHEMA['roles'][1] if k!='jd'],[('label','项目'),('value','内容')])+'<h4>完整 JD</h4><pre>'+esc(r['jd'])+'</pre></details>']
   parts+=['<h3>最终推荐</h3><p>'+esc(c['recommendation_reason'])+'</p>',table([r for r in c['roles'] if r['recommended']],[('title','岗位'),('bu','BU'),('cities','地点'),('basis','理由')]),'<h3>用户最终选择（待当前版本明确确认）</h3>',table(sorted([r for r in c['roles'] if r['selected']],key=lambda r:r['order']),[('order','次序'),('title','岗位'),('bu','BU'),('cities','地点'),('url','链接')]),'<h3>投递轮次、公司及 BU 数量与冷冻期</h3>',records(c['rules'],SCHEMA['rules'][1],'dimension'),'<h3>内推码与适用范围</h3>',table(c['referrals'],SCHEMA['referrals'][1]),'<h3>志愿（与处理次序独立）</h3>',table(c['preferences'],SCHEMA['preferences'][1]),'<h3>研究完成与待补检查</h3>',table(c['research'],SCHEMA['research'][1]),'<h3>现有 Excel 公司记录</h3>']
+  parts+=['<h3>用户确认的公司／BU志愿顺序</h3><p>此顺序独立于官网志愿机制及Agent推荐；未确认时不代填序号。</p>']
+  priorities=c.get('user_priorities',[])
+  for group in dict.fromkeys(p.get('group_id') or '待核分组' for p in priorities):
+   members=[{**p,'title':next((r['title'] for r in c['roles'] if r['id']==p['role_id']),'未知岗位')} for p in priorities if (p.get('group_id') or '待核分组')==group]
+   parts+=['<h4>'+esc(group)+'</h4>',table(sorted(members,key=lambda p:p['rank'] if type(p.get('rank'))==int else float('inf')),[('title','岗位名称')]+PRIORITY_FIELDS)]
   for old in c.get('existing_data',[]):parts+=['<details><summary>'+esc(old['sheet'])+'</summary><pre>'+esc(json.dumps(old['values'],ensure_ascii=False,indent=2))+'</pre></details>']
   parts+=['</section>']
  return ''.join(parts)+'</main></html>'
@@ -383,7 +392,7 @@ def confirm(book,batch,key,evidence,html_sha):
  matches=[c for c in companies if c['company_key']==key]
  if len(matches)!=1:raise ValueError('公司身份不唯一')
  c=matches[0]
- errors=validate_company(c)+validate_research(c,True)
+ errors=validate_company(c)+validate_research(c,True)+priority_evidence_errors(c,root,safe_ref,sha)
  if errors:raise ValueError('; '.join(errors))
  from workbook_store import check_full
  if check_full(book):raise ValueError('完整JSON未同步')
@@ -407,7 +416,7 @@ def check(book,batch,url=None,target=None):
   targets=[c for c in companies if url is None or any(r['url']==url for r in c['roles'])]
   if not targets or (url and len(targets)!=1):errors.append('交接中没有唯一对应岗位')
   for c in targets:
-   errors+=validate_company(c)+validate_research(c,True)
+   errors+=validate_company(c)+validate_research(c,True)+priority_evidence_errors(c,root,safe_ref,sha)
    if target is not None and target!=preference_target(c,url):errors.append('目标确认的志愿与公司方案不一致')
    for ref in c['referrals']:
     if ref['status']=='verified' and ref['expires']:

@@ -4,6 +4,8 @@ Read this reference before opening/filtering roles, filling, or submitting any a
 
 ## Browser selection and retained tabs
 
+用户明确选择搜索 MCP 的 Chrome+内置浏览器并发时，按 [search-mcp](search-mcp.md) 同时执行独立公司任务，使用统一派发和结果检查；这是已批准分支，不再重复询问同一双通道授权。未作此选择时适用下方默认顺序和降级要求。页面保护、范围和申请边界继续生效。
+
 - Browser priority is **in-app browser → Chrome + computer use → Playwright framework**. Start in the in-app browser. Before each downgrade, show the actual failure, proposed next tier and effect on login/unsaved work, then obtain the user's explicit confirmation for that transition. Confirmation of one transition does not authorize the next. Preserve company tabs and state while waiting; do not automatically switch or bypass a site safety refusal. The in-app browser tool's own Playwright-named control API remains the first tier; it is not use of the separate Playwright framework.
 - Read [browser tab grouping](chrome-window-grouping.md); the ten-page Chrome window rule applies only to an explicitly selected Chrome branch. Each tab keeps its company identity; never repurpose another company's tab or a user window.
 - Confirm the batch intent before opening company windows. In `准备投递` mode, keep filtered result pages and role details open for user selection and review. In `信息收集` mode, keep them open during that company's investigation; save and read back the official company campus URL plus **every verified in-scope direct role URL and JD** in the workbook, or record the exact pending blocker, before closing only that company's eligible agent-created tabs and advancing. Window closure does not turn a blocked or partially recorded company into completed coverage. This choice never authorizes résumé upload, form filling or application submission.

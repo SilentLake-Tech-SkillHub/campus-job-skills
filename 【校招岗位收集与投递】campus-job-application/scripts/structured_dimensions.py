@@ -1,6 +1,6 @@
 """Typed dimensions shared by workbook, company JSON, review and application gates."""
 EXTRA_FIELDS = {
- 'company': [('scope_status','需求结构化状态'),('regions','地区范围'),('cohort','招聘届别'),('employment_types','用工范围'),('role_families','岗位族'),('hard_cities','城市硬范围'),('preferred_cities','城市偏好')],
+ 'company': [('scope_status','需求结构化状态'),('regions','地区范围'),('cohort','招聘届别'),('employment_types','用工范围'),('role_families','岗位族'),('hard_cities','城市硬范围'),('preferred_cities','城市偏好'),('priority_scope','用户志愿排序范围'),('priority_scope_source','排序范围来源'),('priority_scope_checked_at','排序范围核验时间')],
  'plans': [('category','计划类别'),('window_status','窗口状态'),('window_start','开放日期'),('window_end','截止日期'),('requirements_status','要求结构化状态'),('degree_levels','学历要求'),('majors','专业要求'),('graduation_start','毕业起始日期'),('graduation_end','毕业截止日期')],
  'roles': [('round_id','招聘轮次ID'),('city_options','城市选项')],
  'rules': [('preference_mode','志愿机制'),('plan_ids','适用计划ID'),('bu_ids','适用BU'),('round_id','适用轮次ID'),('round_start','轮次开始日期'),('round_end','轮次结束日期'),('limit_type','限额类型'),('usage_status','已用名额状态'),('reset_policy','名额重置机制'),('reset_at','重置日期'),('relation','计划或BU关系'),('cooldown_triggers','冷冻触发动作'),('cooldown_duration','冷冻时长'),('cooldown_unit','冷冻时长单位'),('cooldown_until','冷冻截止日期'),('cooldown_release','解除条件'),('change_actions','撤回换岗动作'),('quota_effect','动作对名额影响')],

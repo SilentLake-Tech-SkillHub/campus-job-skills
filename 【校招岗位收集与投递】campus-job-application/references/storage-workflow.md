@@ -9,7 +9,7 @@
 3. 对候选读取完整 JD，分别记录职责档位、资格依据、推荐与用户选择。特殊计划展示要求并取得是否考虑的决定。
 4. 查完公司/计划/轮次/BU/共享名额/同时流程/冷冻期/撤回换岗/志愿规则；按每个计划与 BU 查内推码。没有找到码也记录已查来源、日期和范围，不能空着跳过。
 5. 核实是否设置志愿，记录志愿组、岗位、序号、名称、对应 BU/地点。无此机制时 `rank: null`、`status: not_applicable`；未查清为 `unknown`。`roles.order` 是处理次序，绝不能充当志愿序号。同一有序志愿组内序号唯一，不同组可以重复；平行志愿不填序号。未知志愿阻止已选岗位交接。
-6. 用固定写入脚本更新原表和八张共享表，读回后同步全量 JSON、全部现有批次 JSON 与 HTML。运行 `audit` 列出准确缺口；完成检查后才向用户交付正式核对页，过程中可以展示清楚标注的草稿。
+6. 用固定写入脚本更新原表和九张共享表，读回后同步全量 JSON、全部现有批次 JSON 与 HTML。运行 `audit` 列出准确缺口；完成检查后才向用户交付正式核对页，过程中可以展示清楚标注的草稿。
 7. 用户核对当前 HTML 全部内容后，保存确认依据，运行 `confirm`；进入投递前运行 `check` 和投递阶段门禁。投递端继承确认的志愿；提交目标确认中的“意向”必须等于 `preference_target` 输出（无机制为“无”，有机制为“组/序号/名称/BU/地点”，多项用中文分号分隔）。页面选项变化先回写和重新确认，不现场自行换志愿。
 
 `研究检查` 必须含 plans、catalog、jd、eligibility、rules、referrals、preferences 七项。每项状态为 todo / checked / blocked，并保存来源、核验时间或具体缺口。checked 表示已经执行这项研究，不代表所有事实都已得到肯定答案。计划和目录检查还需记录应有数量、实际数量，与明细行数相等；分页或官网总量不明则保留待查，不能宣称完整。规则“已查但未披露”可记录 unknown 和已查来源，依交接契约向用户披露；不能把未开展的研究直接标 checked。脚本检查字段、关系、数量与同步；官网来源是否充分由执行者逐项核对，脚本不能替代取证。
@@ -74,6 +74,7 @@ Excel 和 JSON 使用同一份字段契约。不得以备注、Markdown 或 `tex
 | 撤回、换岗、重投 | 投递规则 / change_actions、quota_effect；影响为 retained / released / consumed / conditional / unknown / not_applicable |
 | 内推码与适用性 | 内推信息 / code、cohort、plan_ids、bu_ids、role_ids、valid_from、expires、status、source、checked_at |
 | 志愿 | 志愿明细 / role_id、group_id、rank、label、bu、cities、status；rank 可为 null，但必须区别已知无机制和未知 |
+| 用户公司/BU志愿顺序 | 公司核对 / priority_scope、priority_scope_source、priority_scope_checked_at；用户志愿 / role_id、scope、group_id、bu、rank、status、confirmation_ref、confirmation_sha256、confirmed_at；官网无机制或平行时仍独立记录用户顺序 |
 | 研究进度、来源、确认 | 研究检查七项、各明细 source/checked_at、公司确认字段和版本，独立于已提交状态 |
 
 字段与类型由 `scripts/company_handoff.py` 及 `scripts/structured_dimensions.py` 共同定义。列表在 Excel 专用列以 JSON 数组保存，读回后恢复为真正的数组；数量/布尔/空值恢复对应 JSON 类型，不能变成一段自然语言说明。全量 JSON 的 `company_batches` 提供所有已建批次的结构化公司对象，`sheets` 保留所有原表业务单元格。旧记录仅被原样导出，不等于已拆分成新业务字段；初始化将其列为待补并清除旧协议批准。完成结构化拆分和来源核验后，才可将研究检查置为 checked、进入用户确认。

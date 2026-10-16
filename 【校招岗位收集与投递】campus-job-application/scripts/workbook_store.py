@@ -282,9 +282,11 @@ def initialize(book,batch,sheet,scope,company=None):
           'conditions':[],'preferences':[],'research':pending_tasks()})
     # Upgrade existing v1 companies without turning old selections into new consent.
     for c in existing:
-        if not c.get('scope_status') or not c['research'] or ('preference' not in {r['dimension'] for r in c['rules']} and not c['preferences']):
+        if not c.get('scope_status') or not c['research'] or 'priority_scope' not in c or ('preference' not in {r['dimension'] for r in c['rules']} and not c['preferences']):
             c['scope_status']='unknown';c['version']+='-schema-v2';c['coverage']='partial';c['gaps']=(c['gaps']+'；新流程检查待补').strip('；')
             c['research']=pending_tasks()
+            c.setdefault('priority_scope','unknown')
+            c.setdefault('user_priorities',[{'id':'up-'+r['id'],'role_id':r['id'],'scope':'unknown','status':'unknown','rank':None} for r in c['roles']])
             c['preferences']=[{'id':'pref-'+r['id'],'role_id':r['id'],'status':'unknown','mode':'unknown','rank':None} for r in c['roles']]
             if 'preference' not in {r['dimension'] for r in c['rules']}:
                 c['rules'].append({'id':'preference','dimension':'preference','scope':'公司当前范围','status':'unknown','text':'志愿规则待核实','gap':'历史协议缺少独立志愿'})

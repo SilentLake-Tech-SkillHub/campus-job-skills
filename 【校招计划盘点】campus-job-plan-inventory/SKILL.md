@@ -1,7 +1,7 @@
 ---
 name: campus-job-plan-inventory
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
 description: Identify and inventory applicable campus-recruitment plans once per company during the first-pass sweep; after that sweep, investigate plan-relationship gaps only when the user selects them.
 ---
 
@@ -61,4 +61,6 @@ Use the parent Skill's default in-app browser and [browser tab grouping](../【�
 
 ## 数据建设闭环
 
-执行[数据建设与固定脚本](../【校招岗位收集与投递】campus-job-application/references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、八张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。
+执行[数据建设与固定脚本](../【校招岗位收集与投递】campus-job-application/references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、九张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。
+
+用户明确选择搜索 MCP 双浏览器并发时，继承搜索主 Skill 的 search-mcp 引用，两个浏览器处理不同独立任务；用户公司／BU内志愿顺序按公司交接契约单独保存，不替代官网志愿机制。
