@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.5.1"
+  version: "1.6.0"
 ---
 
 # 校招职位刷新与投递协作
@@ -160,3 +160,7 @@ This is the standing row-organization logic for every regional role sheet listed
 - Use browser-acceptance-screenshot for real browser checkpoints: filtered result and verified role detail when preference-filtered, completed pre-submit form, and post-submit receipt.
 - Update task, scope, risk, validation, acceptance, and Plan records when their state materially changes.
 - Never store passwords, cookies, OTPs, government-ID contents, or other secrets in the workbook, Skill, screenshots, or Markdown ledgers.
+
+## 数据建设闭环
+
+执行[数据建设与固定脚本](references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、八张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。

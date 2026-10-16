@@ -2,7 +2,7 @@
 name: campus-job-parallel-search
 description: Coordinate user-approved multi-Agent campus-job research with exclusive source assignments, independent evidence outputs and serial tracker reconciliation. Use after this search batch selects multiple AI participants; it does not prepare or submit applications.
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # 多 Agent 共同搜索岗位
@@ -52,3 +52,5 @@ Before accepting a delta or reporting progress, load [the mandatory progress con
 ## 公司方案交付
 
 读取[公司核对交接契约](../../references/company-review-handoff.md)。独占范围交付还包含全部计划、全岗位名称目录、三档候选、推荐理由、规则矩阵、按范围内推核查；参与者不替用户确认。协调者串行维护 Excel，生成 HTML、接收用户确认并导出 JSON；每次刷新比对版本与文件摘要。子任务完成或 JSON 存在不能冒充用户确认。
+
+交付时按父 Skill 的[固定存储流程](../../references/storage-workflow.md)写入或提交增量：内推每个适用范围须有来源与结果；研究检查不能以留空代替。只有协调者写共享 Excel 并刷新全量及批次 JSON，参与者不单独刷新。

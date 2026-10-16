@@ -2,7 +2,7 @@
 name: campus-job-referral-code
 description: Find, verify and record a campus-recruitment referral code (内推码) for a mainland-China company before the search-side company HTML review is delivered, searching Nowcoder (牛客) first. Use whenever a mainland research batch prepares a company review, when the user mentions 内推码/内推/referral code, or when an application form shows a referral field — even if the user did not ask for the search explicitly.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
 ---
 
 # 内推码查询
@@ -60,3 +60,5 @@ metadata:
 ## 搜索端交接
 
 按[公司方案契约](../../references/company-review-handoff.md)记录每个适用范围的码、有效期和核实结论，先写 Excel 的内推信息及对应岗位，再进入 HTML。多码冲突、未找到、未核实都保留来源；不默认一个码覆盖整家公司。其他地区明确核对官方推荐要求，不适用有依据即可，不强制牛客。投递端接收已有结果，仅对过期/冲突/表单变化回查，任何更新都同步 Excel 和 JSON。
+
+交付时按父 Skill 的[固定存储流程](../../references/storage-workflow.md)写入或提交增量：内推每个适用范围须有来源与结果；研究检查不能以留空代替。只有协调者写共享 Excel 并刷新全量及批次 JSON，参与者不单独刷新。

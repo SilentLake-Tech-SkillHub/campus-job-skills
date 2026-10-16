@@ -122,4 +122,6 @@ Do not add extra status values without a user-approved schema change.
 
 ## 公司方案交接更新
 
-执行[公司机会核对与交接](company-review-handoff.md)：新增五张跨公司明细表，保留既有地区表列与状态；全部岗位目录、三档候选、推荐、用户选择分开记录。HTML用于核对，Excel为主，JSON从Excel导出并每次同步。准备申请前须完整公司确认，内推核查前移；与本文件旧的直接填表描述冲突时，以该交接入口为准。
+执行[公司机会核对与交接](company-review-handoff.md)：新增八张跨公司明细表，保留既有地区表列与状态；全部岗位目录、三档候选、推荐、用户选择分开记录。HTML用于核对，Excel为主，JSON从Excel导出并每次同步。准备申请前须完整公司确认，内推核查前移；与本文件旧的直接填表描述冲突时，以该交接入口为准。
+
+常规字段更新使用[数据建设与固定脚本](storage-workflow.md)的统一键控写入、保存读回与全量 JSON 刷新。志愿和研究检查在共享表保留，原地区表不新增零散列。

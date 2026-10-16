@@ -2,7 +2,7 @@
 name: campus-job-preference-intake
 description: Confirm each campus-recruitment batch's company scope and semantic role families, then resolve material role-boundary questions before official searches.
 metadata:
-  version: "1.3.0"
+  version: "1.4.0"
 ---
 
 # 校招岗位偏好确认
@@ -45,3 +45,7 @@ Report the exact company/industry and region set, graduating class, batch intent
 ## 公司方案的三档与确认
 
 读取[公司机会核对与交接](../【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)。确认用户明确岗位类型与软倾向，供完全符合/部分符合判断；不把用户产品、商家产品等标题写死为某档。先发现并展示具体特殊计划的培养路径、要求及名额影响，再问是否考虑，不能仅问抽象的“要不要管培”。初始 Query 不要求用户预先知道所有计划。完整目录包含适用计划所有岗位名称；职责/城市硬范围控制候选和推荐。最终由用户在 HTML 中确认具体选择，写回 Excel 并同步 JSON；一般准备授权不代替公司方案确认。
+
+## 数据建设闭环
+
+执行[数据建设与固定脚本](../【校招岗位收集与投递】campus-job-application/references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、八张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。
