@@ -214,6 +214,8 @@ class FlowStorageTests(unittest.TestCase):
   with self.assertRaises(ValueError):self.draft()
  def test_html_discloses_structured_scope(self):
   self.c['regions']=['合成独立地区值'];self.draft();page=(h.paths(self.book,self.batch)/'公司核对.html').read_text(encoding='utf-8');self.assertIn('合成独立地区值',page);self.assertIn('需求结构化状态',page)
+ def test_draft_pending_jd_and_coverage_are_visible(self):
+  self.c['coverage']='partial';self.c['gaps']='待核验';r=self.c['roles'][0];r.update(tier='pending',selected=False,recommended=False,jd='合成待核完整JD文本');self.draft();page=(h.paths(self.book,self.batch)/'公司核对.html').read_text(encoding='utf-8');self.assertIn('合成待核完整JD文本',page);self.assertIn('覆盖未完整',page);self.assertNotIn('<td>覆盖状态</td><td>部分符合</td>',page)
  def test_catalog_count_mismatch(self):
   next(x for x in self.c['research'] if x['id']=='catalog')['expected_count']=50
   with self.assertRaises(ValueError):self.draft()
