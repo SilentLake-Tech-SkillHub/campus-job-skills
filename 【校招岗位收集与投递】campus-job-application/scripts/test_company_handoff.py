@@ -212,6 +212,8 @@ class FlowStorageTests(unittest.TestCase):
  def test_structured_plan_bu_rule_scope_is_enforced(self):
   rule=next(x for x in self.c['rules'] if x['dimension']=='bu');rule['bu_ids']=['BU-A']
   with self.assertRaises(ValueError):self.draft()
+ def test_html_discloses_structured_scope(self):
+  self.c['regions']=['合成独立地区值'];self.draft();page=(h.paths(self.book,self.batch)/'公司核对.html').read_text(encoding='utf-8');self.assertIn('合成独立地区值',page);self.assertIn('需求结构化状态',page)
  def test_catalog_count_mismatch(self):
   next(x for x in self.c['research'] if x['id']=='catalog')['expected_count']=50
   with self.assertRaises(ValueError):self.draft()
