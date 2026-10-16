@@ -1,10 +1,21 @@
 # campus-job-skills
 
-**当前主 Skill：v1.7.0 · 2026-10-17**
+**当前主 Skill：v1.8.0 · 2026-10-17**
 
-## 本次更新：搜索 MCP 并发与用户志愿
+## 本次更新：完整招聘研究与数据核对 MCP
 
-搜索 MCP 用持久任务队列，同时为 Chrome 和内置浏览器分配不同公司的查询。浏览器由宿主接口执行；MCP 收回实际证据、检查数量和遗漏后推进下一轮。两通道已完成一组真实并发访问，返回的未闭环事项保持待核，不因访问成功而算公司完成。安装入口与调用方式见[搜索 MCP](【校招岗位收集与投递】campus-job-application/references/search-mcp.md)。
+同一 MCP 现在覆盖从双浏览器搜索到用户核对的数据流程。Chrome 和内置浏览器分别处理独立公司；收集后的资料先保存为结构化 JSON 草稿，再由固定代码写入 Excel、读回核对、同步整本业务 JSON 与批次 JSON，并生成固定格式 HTML。用户调整后重新生成，明确确认当前版本后才记录确认。
+
+初始化可以只读展开现有 Excel 的表头、公司数及 JSON 同步状态，再按公司或工作表分页读取。只读展开不会创建明细表；建立研究表和正式写入仍遵守用户批准的时机。每次写入检查工作簿与草稿 Hash，保留原有记录、备份和已提交状态。
+
+| 环节 | MCP 工具 |
+|---|---|
+| 搜索与证据 | `search_batch_create`、`search_dispatch`、`search_result_record`、逐轮检查与恢复 |
+| 初始化与快速展开 | `recruiting_data_open`、`recruiting_data_query`、`recruiting_data_initialize` |
+| 结构化 JSON 到 Excel | `recruiting_draft_put/get`、`recruiting_data_commit` |
+| HTML、用户调整与确认 | `recruiting_review_refresh`、`recruiting_review_confirm`、`recruiting_handoff_check` |
+
+MCP 复用 Skill 内已有的固定存储与模板代码。Excel 是主记录；草稿 JSON 是交换输入，完整及批次 JSON 是同版本导出。生成、打开 HTML 和用户明确确认分别记录。接口不授予登录、填写或提交申请的权限。调用及部署见[数据 MCP](【校招岗位收集与投递】campus-job-application/references/recruiting-data-mcp.md)与[双浏览器搜索](【校招岗位收集与投递】campus-job-application/references/search-mcp.md)。
 
 每家公司还会请你确认岗位志愿顺序：不分 BU 时公司内排序，分 BU 时各 BU 独立排序。用户顺序单独保存到 Excel/JSON/HTML；官网的平行或无志愿机制继续独立保留。
 
@@ -28,6 +39,8 @@
 图中是工具实际生成的合成测试页面，用于展示格式，不代表真实公司核验或用户批准。完整契约及命令见[公司核对与交接](【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)。
 
 ## 更新日志
+
+- **v1.8.0 · 2026-10-17**：MCP 从搜索调度扩展到初始化快速展开、结构化 JSON 草稿、Excel 固定写入及读回、整本/批次 JSON 与固定 HTML 生成、用户调整和明确确认；增加工作区边界、写入版本及已提交保护测试。实际 MCP 协议合成闭环已验证，本地共 171 项测试通过。[Issue #15](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills/issues/15)
 
 - **v1.7.0 · 2026-10-17**：新增搜索 MCP 的 Chrome/IAB 并发派发、共享来源互斥、租约与逐轮证据检查；新增用户公司／BU志愿顺序、私有确认依据及篡改门禁，九张共享表同步导出。[Issue #14](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills/issues/14)
 
