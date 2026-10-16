@@ -7,6 +7,7 @@ import html
 import json
 import os
 import shutil
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -250,12 +251,12 @@ def write(book,batch,data):
 
 def confirm(book,batch,key,evidence,html_sha):
  out=paths(book,batch);root=Path(book).resolve().parent
- snapshot=json.loads((out/'公司方案.json').read_text())
+ snapshot=json.loads((out/'公司方案.json').read_text(encoding='utf-8'))
  if snapshot['workbook_sha256']!=sha(book):raise ValueError('Excel刷新后须重新导出核对')
  if sha(out/'公司核对.html')!=html_sha:raise ValueError('用户审核HTML版本不一致')
  companies=read(book,batch)
  if digest(companies)!=snapshot['data_sha256'] or snapshot['companies']!=companies:raise ValueError('JSON与Excel不一致')
- if (out/'公司核对.html').read_text()!=render(companies,batch):raise ValueError('HTML被修改')
+ if (out/'公司核对.html').read_text(encoding='utf-8')!=render(companies,batch):raise ValueError('HTML被修改')
  matches=[c for c in companies if c['company_key']==key]
  if len(matches)!=1:raise ValueError('公司身份不唯一')
  c=matches[0];ref=safe_ref(root,evidence)
@@ -266,12 +267,12 @@ def confirm(book,batch,key,evidence,html_sha):
 def check(book,batch,url=None):
  try:
   out=paths(book,batch);root=Path(book).resolve().parent
-  payload=json.loads((out/'公司方案.json').read_text());companies=read(book,batch)
+  payload=json.loads((out/'公司方案.json').read_text(encoding='utf-8'));companies=read(book,batch)
   errors=[]
   if payload.get('schema_version')!=1 or payload.get('batch_id')!=batch:errors.append('交接协议或批次不一致')
   if payload.get('workbook_sha256')!=sha(book):errors.append('Excel/JSON未同步')
   if payload.get('companies')!=companies or payload.get('data_sha256')!=digest(companies):errors.append('JSON内容与Excel不一致')
-  if not (out/'公司核对.html').is_file() or (out/'公司核对.html').read_text()!=render(companies,batch):errors.append('HTML与Excel不一致')
+  if not (out/'公司核对.html').is_file() or (out/'公司核对.html').read_text(encoding='utf-8')!=render(companies,batch):errors.append('HTML与Excel不一致')
   targets=[c for c in companies if url is None or any(r['url']==url for r in c['roles'])]
   if not targets or (url and len(targets)!=1):errors.append('交接中没有唯一对应岗位')
   for c in targets:
@@ -302,9 +303,11 @@ def check(book,batch,url=None):
  except (OSError,ValueError,KeyError,TypeError) as exc:return ['交接不可读取: '+str(exc)]
 
 def main():
+ for stream in (sys.stdout,sys.stderr):
+  if hasattr(stream,'reconfigure'):stream.reconfigure(encoding='utf-8',errors='backslashreplace')
  p=argparse.ArgumentParser(description=__doc__);p.add_argument('command',choices=['write','export','confirm','check']);p.add_argument('--workbook',required=True,type=Path);p.add_argument('--batch',required=True);p.add_argument('--input',type=Path);p.add_argument('--company');p.add_argument('--evidence');p.add_argument('--html-sha256');p.add_argument('--url');a=p.parse_args()
  try:
-  if a.command=='write':write(a.workbook,a.batch,json.loads(a.input.read_text()))
+  if a.command=='write':write(a.workbook,a.batch,json.loads(a.input.read_text(encoding='utf-8')))
   elif a.command=='export':export(a.workbook,a.batch)
   elif a.command=='confirm':confirm(a.workbook,a.batch,a.company,a.evidence,a.html_sha256)
   else:

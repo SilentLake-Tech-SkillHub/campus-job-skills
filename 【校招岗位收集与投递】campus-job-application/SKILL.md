@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.5.0"
+  version: "1.5.1"
 ---
 
 # 校招职位刷新与投递协作

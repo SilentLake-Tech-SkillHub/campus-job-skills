@@ -51,3 +51,5 @@ Prepare 前：检查Excel/JSON哈希及内容一致、对应公司已确认、HT
 两套技能包携带相同 `scripts/company_handoff.py`，同步修改并比对哈希。它的命令：`write --workbook ... --batch ... --input <草稿JSON>`（只更新本批给定公司，清除其旧确认）、`export`（从Excel读回生成JSON和HTML）、`confirm --company <公司键> --evidence <相对工作簿目录的确认文件> --html-sha256 <用户看过的HTML哈希>`、`check --url <岗位直链>`。所有命令带 `--workbook` 和 `--batch`。confirm 只能在用户确认后执行；不能自行创建用户确认原话。write 输入为 `{ "companies": [...] }`，字段与导出结构相同；它是临时交换输入而非长期第二台账。脚本仅更新五张明细表，候选地区行/原有计划与入口仍按工作簿契约先写入。
 
 测试覆盖：目录外岗位不漏列、特殊计划未考虑不可选、推荐与用户选择不同、分轮次/BU/共享名额超限、缺内推查证、缺确认、篡改JSON/HTML/确认文件、Excel刷新陈旧导出、旧确认失效及地区表不一致。真实网站/账号规则仍需现场核验。
+
+转换与存储由搜索端生成、投递端接收并刷新。支持先组织 UTF-8 草稿 JSON，再用 write 写入既有 Excel，随后读回导出同版本 JSON/HTML；也可先更新 Excel 后 export。JSON 覆盖本批公司方案及相关既有行，不是任意工作簿的无损序列化。真实数据和历史备份均在私有工作簿旁，不写入 Skill。此工具不是后台文件监听器；手动改 Excel 后必须 export，陈旧快照会被 check 阻断。所有 JSON/HTML 文本按 UTF-8 读写。
