@@ -63,3 +63,7 @@ Keep the form open. `待投递` remains the workbook status.
 Open/filter 依 [偏好契约](preference-contract.md) 仅用硬范围筛除，排序不限制覆盖。填写前逐岗展示公司、岗位、直链、BU 或未披露、城市、用工、方向、完整 JD 依据及筛选理由，持久化 pre_form_report_ref；退出/交付报告 fill/save/submit 的实际状态与证据，不以登录代替准备。Review 保留表单版本，提交继续精确目标与版本审核。
 
 每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
+
+## 公司方案交接更新
+
+执行[公司机会核对与交接](company-review-handoff.md)：新增五张跨公司明细表，保留既有地区表列与状态；全部岗位目录、三档候选、推荐、用户选择分开记录。HTML用于核对，Excel为主，JSON从Excel导出并每次同步。准备申请前须完整公司确认，内推核查前移；与本文件旧的直接填表描述冲突时，以该交接入口为准。

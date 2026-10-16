@@ -24,3 +24,7 @@
 ## 独立偏好与执行证据
 
 输入顶层包含 preferences、roles、prior_roles；各 record 含 preference_version。按 [偏好证据契约](preference-contract.md) 校验旧版本、逐岗前置报告、身份及已投/选岗保护。no_suitable_formal_found: true 结论需充分正式覆盖和无合适正式岗依据；不足不能称无正式岗。转正实习展示不受这项门槛限制。偏好更新只复用原 JD 与指定复查范围，不重新入首轮。无岗位时 roles 为空，仍需公司覆盖证据。结构检查不验证自然语言或网站真伪，也不是平台强制 hook。
+
+## 公司方案交接更新
+
+执行[公司机会核对与交接](company-review-handoff.md)：新增五张跨公司明细表，保留既有地区表列与状态；全部岗位目录、三档候选、推荐、用户选择分开记录。HTML用于核对，Excel为主，JSON从Excel导出并每次同步。准备申请前须完整公司确认，内推核查前移；与本文件旧的直接填表描述冲突时，以该交接入口为准。

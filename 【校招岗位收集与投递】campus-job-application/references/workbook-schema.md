@@ -50,7 +50,7 @@ Do not merge the regional sheets or create per-company sheets.
 
 `备注` records material, evidence-based role facts that do not fit the existing fields, especially an officially stated conversion internship included last in the same report under a privately confirmed conversion_last policy, cohort eligibility, minimum duration/attendance and conversion conditions. Preserve `实习` in the title and plan; label an eligible case `实习转正候选` and quote the official evidence concisely. State that conversion is an opportunity, not a guarantee. Ordinary internships without explicit official conversion wording remain out of a formal/full-time batch. For a company placeholder with no in-scope role row, keep `岗位名称`/`岗位链接` blank and use `备注` for the checked cohort, sources, date, exact result, any previous attempt, and unresolved scope. Put mergers into another company/plan, user stop decisions, application deadlines, eligibility, and internship conversion facts here; they are not `盘点状态` values. The note must distinguish a truly untouched `尚未推进` row from a partially checked one. This visible note is a pointer to `校招计划` evidence, not a role. This field does not imply user selection or application authorization.
 
-`内推码` is filled by the [referral-code subskill](../skills/campus-job-referral-code/SKILL.md) with the same company-level value on each of the company's role rows, formatted `<码>｜<来源平台>｜<届别/批次>｜<核实日期>｜<来源链接>`, or `未找到｜<已查来源>｜<核实日期>`. Leave it blank until checked; never copy a code from another cohort.
+`内推码` is filled by the [referral-code subskill](../skills/campus-job-referral-code/SKILL.md) with the verified plan/BU/role-scoped value only on applicable role rows, formatted `<码>｜<来源平台>｜<届别/批次>｜<核实日期>｜<来源链接>`, or `未找到｜<已查来源>｜<核实日期>`. Leave it blank until checked; never copy a code from another cohort.
 
 ## Campus plan inventory
 
@@ -119,3 +119,7 @@ Do not add extra status values without a user-approved schema change.
 按 [偏好证据契约](preference-contract.md) 保持原列序、枚举、公式、验证和公司块。身份优先官方 ID/规范直链；同名不同 ID 不误合并，多城市同一 ID 不增行。三轴、用工/方向、版本、筛选理由和执行证据放现有备注及私有流水，不擅加列。匹配分只衡量能力，Top5 仅高亮容量；转正实习同报告末尾，已投/回执/明确选岗不得因偏好更新丢失。
 
 每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
+
+## 公司方案交接更新
+
+执行[公司机会核对与交接](company-review-handoff.md)：新增五张跨公司明细表，保留既有地区表列与状态；全部岗位目录、三档候选、推荐、用户选择分开记录。HTML用于核对，Excel为主，JSON从Excel导出并每次同步。准备申请前须完整公司确认，内推核查前移；与本文件旧的直接填表描述冲突时，以该交接入口为准。

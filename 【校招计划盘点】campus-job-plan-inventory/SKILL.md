@@ -1,7 +1,7 @@
 ---
 name: campus-job-plan-inventory
 metadata:
-  version: "1.1.2"
+  version: "1.2.0"
 description: Identify and inventory applicable campus-recruitment plans once per company during the first-pass sweep; after that sweep, investigate plan-relationship gaps only when the user selects them.
 ---
 
@@ -52,3 +52,9 @@ Use the parent Skill's default in-app browser and [browser tab grouping](../【�
 - Use the Spreadsheets Skill for every workbook edit, with a recoverable backup before structural changes and saved-file/visual validation afterward.
 
 查询、续跑和汇报前必须按[研究进度强制核对](../【校招岗位收集与投递】campus-job-application/references/research-progress.md)读取当前工作簿状态、备注和有效流水，运行覆盖记录校验。历史“首轮已查”状态/备注是访问证据，不能被旧标签枚举忽略。
+
+## 完整计划、全岗位目录与投递规则
+
+每家公司读取[公司机会核对与交接](../【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)，统计已发现适用计划数及覆盖缺口，遍历计划完整岗位名称目录，再筛三档候选。主动核实公司/计划/轮次/BU/跨计划共享/同时流程数、冷冻期、撤回及换岗后果；未知逐项留已查来源，不能以单个公司总上限替代矩阵。无 BU 划分时仍查公司总上限。特殊计划先展示要求再由用户决定是否考虑。
+
+首轮可将查不到的规则留明确缺口并推进其他公司；进入该公司投递前必须在 HTML 中明示并取得用户对当前方案的完整确认，不能将“留待补查”隐藏到投递端。规则实际冲突、未确认选择或不同步版本不可交接。内推码核查同样由搜索端在 HTML 交付前完成。

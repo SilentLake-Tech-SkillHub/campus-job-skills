@@ -2,7 +2,7 @@
 name: campus-job-preference-intake
 description: Confirm each campus-recruitment batch's company scope and semantic role families, then resolve material role-boundary questions before official searches.
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # 校招岗位偏好确认
@@ -41,3 +41,7 @@ Return the choice and missing coordination facts to the search parent. It routes
 ## Handoff
 
 Report the exact company/industry and region set, graduating class, batch intent, employment type, role and city preferences, selected branch, search execution mode and coordination decision evidence to `campus-job-application`. Record these as **per-batch decisions**, not permanent defaults. Before reporting a zero-result search, verify the site's selected employment-type chips or checkboxes against that scope, then separately verify cohort eligibility and experience requirements from the plan or JD. A preference is a browsing instruction, not a promise that matching roles will exist and not authorization for application filling or submission.
+
+## 公司方案的三档与确认
+
+读取[公司机会核对与交接](../【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)。确认用户明确岗位类型与软倾向，供完全符合/部分符合判断；不把用户产品、商家产品等标题写死为某档。先发现并展示具体特殊计划的培养路径、要求及名额影响，再问是否考虑，不能仅问抽象的“要不要管培”。初始 Query 不要求用户预先知道所有计划。完整目录包含适用计划所有岗位名称；职责/城市硬范围控制候选和推荐。最终由用户在 HTML 中确认具体选择，写回 Excel 并同步 JSON；一般准备授权不代替公司方案确认。

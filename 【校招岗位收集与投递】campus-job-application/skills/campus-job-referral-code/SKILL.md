@@ -1,19 +1,19 @@
 ---
 name: campus-job-referral-code
-description: Find, verify and record a campus-recruitment referral code (内推码) for a mainland-China company before its application is prepared, searching Nowcoder (牛客) first. Use whenever a mainland application batch reaches a new company, when the user mentions 内推码/内推/referral code, or when an application form shows a referral field — even if the user did not ask for the search explicitly.
+description: Find, verify and record a campus-recruitment referral code (内推码) for a mainland-China company before the search-side company HTML review is delivered, searching Nowcoder (牛客) first. Use whenever a mainland research batch prepares a company review, when the user mentions 内推码/内推/referral code, or when an application form shows a referral field — even if the user did not ask for the search explicitly.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # 内推码查询
 
-中国大陆不少公司的校招内推码能让简历进入员工推荐通道，但网上流传的码混杂着往届、过期、其他岗位类别的帖子。本子Skill在每家公司准备投递之前先查一次，只留下能证明适用于当前批次的码，并把结果写进岗位主账本，后面填表直接取用。
+中国大陆不少公司的校招内推码能让简历进入员工推荐通道，但网上流传的码混杂着往届、过期、其他岗位类别的帖子。本子Skill在搜索端在每家公司 HTML 核对交付之前查齐各适用范围，只留下能证明适用于当前批次的码，并把结果写进岗位主账本，后面填表直接取用。
 
 先加载[父Skill](../../SKILL.md)和工作簿约定 [workbook-schema](../../references/workbook-schema.md)。目标届别、批次范围和工作簿路径从工作区的求职配置读取，不写进本Skill。
 
 ## 何时调用
 
-- 中国大陆批次进入一家新公司、打开申请表之前。
+- 搜索端完成一家公司的计划/岗位目录、生成用户核对 HTML 之前。
 - 用户提到内推码，或申请表出现“内推码 / 推荐码 / 内推人”字段。
 - 同一公司已有本批次核实过的码时直接复用，不重复搜索；码标注了截止日期且已过期时重新查。
 
@@ -38,7 +38,7 @@ metadata:
 
 ## 写入岗位主账本
 
-在该公司所有相关岗位行的 `内推码` 列写同一内容，格式固定：
+仅在适用计划、BU 和岗位范围内的岗位行 `内推码` 列写入对应内容，格式固定：
 
 ```
 <码>｜<来源平台>｜<届别/批次>｜<核实日期 YYYY-MM-DD>｜<来源链接>
@@ -56,3 +56,7 @@ metadata:
 ## 返回
 
 向父Skill返回：公司、结果（已核实 / 未找到 / 未核实）、码、来源链接、届别依据和核实日期。
+
+## 搜索端交接
+
+按[公司方案契约](../../references/company-review-handoff.md)记录每个适用范围的码、有效期和核实结论，先写 Excel 的内推信息及对应岗位，再进入 HTML。多码冲突、未找到、未核实都保留来源；不默认一个码覆盖整家公司。其他地区明确核对官方推荐要求，不适用有依据即可，不强制牛客。投递端接收已有结果，仅对过期/冲突/表单变化回查，任何更新都同步 Excel 和 JSON。

@@ -2,12 +2,18 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.4.4"
+  version: "1.5.0"
 ---
 
 # 校招职位刷新与投递协作
 
 Use this Skill only inside a job-search workspace that has the project's job-search profile (`产品管理/求职配置.md`). Read that profile first: it names the workbook, regional sheets, target graduating class, default role families, current résumé files, verified application rules and active Plans. If it is missing, ask the user for these values and create it before any browsing or workbook work. Personal and project-specific values belong in the profile, never in this Skill.
+
+## 公司完整方案与用户确认（必读）
+
+每轮搜索、续跑、交付和转投递先读取[公司机会核对与交接](references/company-review-handoff.md)。搜索端负责全部适用计划、计划内完整岗位名称目录、三档候选及完整 JD、最终推荐、轮次/公司/BU/共享名额与冷冻期、内推码查证。先保存 Excel，再生成 HTML 给用户核对；用户完整确认的最终选择写回 Excel，并导出同版本 JSON。每次刷新两份文件一起更新；未确认、不同步或不在最终选择中的岗位不可进入表单。
+
+这一交接要求适用于下方所有模式；旧 Record/fill、Submit 只作为转交入口，不在搜索 Skill 内执行申请。收集范围与申请资格分别判断，用户的软偏好不裁剪完整岗位名称目录；全部目录不等于全部可投。
 
 ## Execution-mode Query
 
@@ -19,7 +25,7 @@ Before allocation, proactively ask about explicit requirements for participants,
 
 ## Referral code (mainland China)
 
-Before preparing any mainland-China company's application, and whenever the user mentions 内推码 or a form shows a referral field, load [campus-job-referral-code](skills/campus-job-referral-code/SKILL.md). It searches Nowcoder (牛客) first, keeps only a code verified for the current cohort, and writes the result to the role rows' `内推码` column. A referral code never changes application authority or the submission gates.
+Before delivering any company review HTML, finish referral research for all applicable plan/BU scopes; for mainland China use the referral subskill. When the user mentions 内推码 or a form shows a referral field, also load [campus-job-referral-code](skills/campus-job-referral-code/SKILL.md). It searches Nowcoder (牛客) first, keeps only a code verified for the current cohort, and writes the result to the role rows' `内推码` column. A referral code never changes application authority or the submission gates.
 
 ## 范围与偏好执行契约
 
@@ -55,8 +61,8 @@ The workflow has two stages. **Stage 1 — first-pass sweep:** process every in-
 
 1. **Open/filter:** first route through preference intake, including batch intent. With no extra hard role/city restriction, open the official broad target-family view; with explicit hard restrictions, use the site's available official role/city filters or search; soft preferences only group the complete in-scope results. In either branch, open and verify every in-scope role-detail page from the visible filtered results in each relevant plan, while retaining that plan's filtered-result page during verification. A result-list page alone does not complete a batch. In `信息收集` mode, **without waiting for the user to select roles**, write or refresh one regional workbook row per verified in-scope role (direct official `岗位链接`, title, location, complete visible JD, BU, plan, `待投递`) and the company's `校招主链接`; read both URL types back from the saved workbook, then close only the eligible agent-created tabs of that company. `待投递` is a tracking default, not the user's selection or permission to apply. In `准备投递` mode keep useful result and verified detail tabs open; recording discovered roles still does not authorize application forms. Report exact deviations such as pagination, missing filters, invalid detail pages, or login gates.
 2. **Record-only:** only when the user explicitly asks to first record every selected role, read all selected role tabs, write or refresh every workbook row, then assess matching from the confirmed résumé and project portfolio. Do not open, fill, upload to, or submit any application form in this mode.
-3. **Record/fill:** after the user selects concrete roles and tells Codex to continue, process each role as one complete unit: read its verified detail page, update the correct regional sheet, assess matching, fill that role's application form, and stop before final submission.
-4. **Submit:** only after the user explicitly approves the listed roles, submit them one at a time, verify each receipt, then update successful workbook rows to `已提交`.
+3. **Record/fill:** complete the company HTML confirmation and Excel/JSON handoff, then route selected roles to the independent job-application-assistant for authorized preparation.
+4. **Submit:** route to job-application-assistant after company handoff. Its current-form approval, exact-target confirmation, receipt verification and Excel/JSON refresh remain required.
 5. **Refresh/status:** a status request is read-only against the workbook, Plan and research log; it does not authorize opening company pages. For an explicit refresh, reload the workbook first, avoid duplicate role links, preserve submitted rows, and refresh only the exact requested companies and gaps. A partial state does not widen the requested scope.
 6. **Close non-priority tabs:** only after a reviewed batch has highlighted roles and the user has confirmed both the retained role list and the separate tab-closing action. This mode never fills or submits an application.
 
@@ -115,22 +121,9 @@ Use this mode after the current company investigation has a recorded outcome, in
 10. Report each role’s company/title/direct URL/BU or 未披露/cities/employment/direction/JD basis and reason, and actual fill/save/submit state (not_started in information collection); also report results by company and plan: resolved employment type and verified selected filters, total in-scope result count, number of valid detail tabs opened, verified role titles and direct links, invalid/inaccessible details, and any plan or result page not searched. Only after all relevant accessible plans and their in-scope results are checked may a zero-result conclusion be made for the company; a generic `Full Time` listing containing only senior roles is not a checked graduate plan, and an unresolved detail-page failure must remain explicit.
 11. Provide a screenshot or other visible browser evidence for each completed batch and list pages that require login, CAPTCHA, SMS, or user action.
 
-## Record and fill
+## Record and fill：交给独立投递流程
 
-公司动作前门禁：先汇报本公司完整岗位包（公司、BU 或未披露、地点、岗位及直链），确认相对本批默认次序有无变动；写入同一 pre_form_report_ref 与 company_order_confirmation_ref，未确认不得开始本公司申请操作。交给 job-application-assistant 时复用该包，最终目标和当前表单版本继续分别审核。
-
-For a batch containing multiple selected roles, complete the following cycle for one role before moving to the next. Do not first batch-read JDs, create several incomplete workbook rows, or partially fill several application pages.
-
-1. Read the role title, explicit work location, complete visible JD, BU or owning organization, direct role URL, company, region, and source campus plan from the current user-opened role tab.
-2. Record `工作地点` exactly as the official role page states it. If it is not stated, leave the cell blank or write `未披露`; do not infer it from team headquarters, company offices, or a city named elsewhere in the JD.
-3. Check for an existing identical direct role URL before inserting. When one company has multiple roles, keep one row per role and copy only the company-level fields.
-4. Write or refresh that single role row with its verified `校招计划`, official work location, complete visible JD, and `待投递`. Keep company placeholder rows blank in every role field, including status.
-5. Apply the Match analysis rules and write `匹配度` and `匹配原因` before opening or filling the application form. First present the per-role company/title/direct URL/BU or 未披露/cities/employment/direction/full-JD basis and screening reason, record pre_form_report_ref and the current preference version; cross-axis conflicts require the user's selection. Report actual fill/save/submit evidence at every handoff.
-6. Check `校招冷静期` before opening or filling the application form. Where it records a quota, cooldown, annual refresh, or an immutable post-submission rule, verify the logged-in account's remaining opportunity count and preserve the user's chosen allocation. A blank cell means no rule has yet been verified, not that no restriction exists.
-7. Fill the current role's application using the authorized résumé appropriate to the page language and only facts supported by the résumé or user-provided materials.
-8. Stop and ask the user about any material missing fact or choice, including expected salary, location preference, work authorization, subjective declarations, privacy consent, conflicts, disability information, demographic questions, or open-ended motivation answers not supported by approved material. Do not advance to a later role while the current role is blocked.
-9. Stop before the final submit action. Check visible required fields and upload controls, retain the form, and capture a reviewable pre-submit screenshot that avoids unnecessary sensitive data.
-10. Only after steps 1-9 for the current role are complete may the next selected role begin. Continue through the selected batch without submitting; after the final role, provide one review package covering all completed forms unless the user asks to review role by role.
+先完成[公司 HTML 核对与 Excel/JSON 交接](references/company-review-handoff.md)，用户确认最终计划/岗位/BU/地点/次序后，调用独立 job-application-assistant。复用已确认的公司方案和次序，仅补投递材料、准备授权、执行方式等缺失项。搜索授权不授予填表或提交；一般选岗授权不替换用户已确认方案。最终表单审核与具体目标提交确认仍由投递流程执行。
 
 ## Record-only
 
@@ -153,14 +146,9 @@ This is the standing row-organization logic for every regional role sheet listed
 4. **岗位类型优先级顺序由用户提供**：每批 Query 先向用户要本批默认岗位类别次序；新批重新确认，不能沿用上一批。续跑首回合若没有本批确认，也先问，确认后才能写行、重排或生成汇总。每家公司开始申请操作前，先用同一份逐岗报告展示公司、BU、办公地、岗位和直链，再确认相对默认次序有没有变动；确认后才继续。将该报告和确认传给投递助手，衔接它的表单前汇报与最终目标/版本门禁，不另建重复清单。各轴分组保留弱优先/平级，不能加权代选；时间排序在同组内保留，明确选岗不被替换。
 5. **汇总文件内容标准**：从地区表生成的岗位汇总文件同样遵守上述归类与排序；每岗位一行，按招聘主体内官方岗位 ID 优先、无 ID 时按规范直链去重；同名不同 BU/城市/ID 保留，一个多城市 ID 不重复计数；默认列：序号、公司、岗位名称（英文）、岗位名称（中文）、岗位分类、实习开始时间/时段、岗位JD（英文）、岗位JD（中文全文翻译）、工作地点、岗位链接、备注。中文岗位名与中文 JD 必须是对官方英文原文的**完整忠实翻译**（逐段覆盖全部小节、保留原文段落与编号结构；公司名/产品名/技术缩写/日期/数字/链接保留原文），中文摘要不得替代全文翻译。
 
-## Submit and verify
+## Submit and verify：独立投递流程负责
 
-1. Treat approval as role-scoped. Repeat the exact company and role list covered by the user's authorization before submitting.
-2. Before each submission, check `校招冷静期` and the logged-in account's displayed remaining count. Do not spend a limited opportunity on a different role or rely on a calendar reset without that current account check.
-3. Submit one role at a time.
-4. Verify a success page, application-center status, confirmation identifier, or another visible receipt. A click, navigation change, disabled button, or email assumption is not a receipt.
-5. Update only verified successes to `已提交`. Keep failures or uncertain outcomes as `待投递` and report the evidence gap.
-6. Never withdraw, delete, or resubmit an application without a new explicit user instruction.
+只交接已确认且同步的公司方案。投递端复核当前账号名额、岗位与材料，按当前审核版本和确切目标授权提交；回执验证后更新 Excel 的已提交状态，并同步导出 JSON。搜索端不凭“推荐”“待投递”或 HTML 确认直接点击最终提交。
 
 ## Verification and records
 
