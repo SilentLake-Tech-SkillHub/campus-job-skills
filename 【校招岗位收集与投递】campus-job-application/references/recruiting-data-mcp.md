@@ -20,6 +20,8 @@
 
 HTML 继续使用同一固定模板：计划要求、完整名称目录、三档候选及完整 JD、推荐、规则矩阵、内推、官网志愿与用户公司/BU排序、既有记录和待核事项。MCP 返回文件位置及 Hash，宿主展示文件；文件生成或打开都不等于用户确认。接口不能通过自己生成确认文本、填入 `confirmed` 或使用推荐次序制造用户批准；`evidence_ref` 必须引用真实用户对该版本的明确回复，宿主负责核对其内容与授权范围。只有测试可以使用明确标注的合成证据。
 
-初始顺序：open → 必要时 refresh → query → 研究并 draft_put/get → 到达批次写入门禁后 initialize/commit → 读回 query → 展示固定 HTML → 用户调整则新草稿 commit、重新展示 → 明确回复后 confirm → handoff_check。首轮未查齐时保存草稿和缺口，不能为测试接口而写真实主表。
+已确认唯一最终HTML的顺序：open → 收集整理及HTML核对 → 用户确认 → 带frozen核对页绑定的draft_put/get → commit → Excel读回及全量/批次JSON校验。commit保留原HTML，artifacts返回原路径，不重做同内容核对；研究检查和申请资格仍独立。
+
+旧模板初始顺序：open → 必要时 refresh → query → 研究并 draft_put/get → 到达批次写入门禁后 initialize/commit → 读回 query → 展示固定 HTML → 用户调整则新草稿 commit、重新展示 → 明确回复后 confirm → handoff_check。首轮未查齐时保存草稿和缺口，不能为测试接口而写真实主表。
 
 现有 `campus-search` 注册名保持兼容；它已是研究和数据核对服务，不仅是网页搜索。新增接口以实际 MCP 工具发现及协议调用为准；修改服务文件不证明当前聊天工具菜单已热加载。已有固定 CLI 保留，数据和门禁结果一致。

@@ -171,6 +171,13 @@ def apply_updates(wb, updates, root):
                 if number <= ws.max_row and any(c.data_type == 'f' for row in ws for c in row):
                     raise ValueError('含公式表插行须专门处理引用，禁止静默移动')
                 ws.insert_rows(number)
+                # openpyxl moves Cell objects but leaves Hyperlink.ref at the old row.
+                # Rebind moved anchors before save, or reloading can create ghost values
+                # and attach another company's link to the inserted role.
+                for shifted_row in ws.iter_rows(min_row=number + 1):
+                    for shifted_cell in shifted_row:
+                        if shifted_cell.hyperlink:
+                            shifted_cell.hyperlink.ref = shifted_cell.coordinate
                 if same:
                     template = same[0] if same[0] < number else same[0] + 1
                     for column in range(1, ws.max_column + 1):

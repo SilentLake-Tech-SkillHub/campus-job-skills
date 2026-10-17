@@ -4,6 +4,12 @@
 
 MCP 调用入口见[数据读写与用户核对](recruiting-data-mcp.md)。同一服务复用本文固定脚本完成初始化展开、JSON草稿、Excel写入及读回、完整JSON与固定HTML生成、用户调整和确认；CLI继续兼容。只读展开不修改Excel，真实写入仍遵守本批授权时机。
 
+## 已确认唯一HTML后持久化
+
+用户先核对最终HTML、再要求Python落账时，使用冻结核对页分支：公司记录写 `review_mode=frozen`，`review_html_ref`、`review_html_sha256`、`review_evidence_ref`、`review_evidence_sha256`、`reviewed_at` 与 `review_business_sha256`。`approved_review.business_digest` 基于规范化字段生成方案摘要；确认依据必须来自用户对该版本的真实回复。`write` 在修改Excel前核对方案及证据，保存读回后只更新完整及批次JSON，保留HTML原字节，不创建第二份核对页或重复要求用户确认。MCP交付原HTML路径。此分支优先于下方旧模板重导HTML步骤；用户调整业务内容时更新方案和对应确认，不静默保留不一致版本。
+
+逐岗决定写入岗位目录 `application_decision`（apply/decline/defer/pending）、`decision_ref`、`decision_sha256`；投递必须与selected=true一致，不投递或暂缓为selected=false。不能仅凭false推断用户已拒绝。完整偏好以公司核对 `preference_contract` 的JSON类型保存，保留城市并列、就业路径等关系；条件明细保留 `personal_result` 与 `personal_evidence`。用户审核通过与事实研究完成、可进入申请分别保存；持久化不把研究缺口改成完成，也不授权申请。
+
 ## 每家公司必须走完的建设流程
 
 1. 从已确认范围和原表建立公司研究记录。已有信息全部保留为来源线索；初始化不等于核验，不新增用户选择或批准。

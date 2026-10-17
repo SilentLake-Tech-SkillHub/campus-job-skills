@@ -32,11 +32,16 @@ SCHEMA.update({
 })
 for kind, fields in EXTRA_FIELDS.items():SCHEMA[kind][1].extend(fields)
 SCHEMA['user_priorities']=('用户志愿',PRIORITY_FIELDS)
+from approved_review import FIELDS as REVIEW_FIELDS, ROLE_FIELDS as DECISION_FIELDS, validate_binding, validate_decisions
+SCHEMA['company'][1].extend(REVIEW_FIELDS)
+SCHEMA['roles'][1].extend(DECISION_FIELDS)
+SCHEMA['company'][1].append(('preference_contract','完整偏好结构'))
+SCHEMA['conditions'][1].extend([('personal_result','个人核对结论'),('personal_evidence','个人核对依据')])
 RESEARCH_ITEMS = {'plans','catalog','jd','eligibility','rules','referrals','preferences'}
 DIMENSIONS = {'company','plan','round','bu','shared','concurrent','cooldown','change','preference'}
 CONFIRM_FIELDS = {'confirmation_ref','confirmation_sha256','confirmed_at','confirmed_digest','reviewed_html_sha256'}
 LIST_FIELDS = {'plan_ids','role_ids'}|DIMENSION_LISTS
-JSON_FIELDS={'condition_value'}
+JSON_FIELDS={'condition_value','preference_contract'}
 BOOL_FIELDS = {'special','recommended','selected'}
 
 def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
@@ -224,7 +229,7 @@ def validate_company(c):
   if not set(ref['role_ids'])<=ids:errors.append('内推引用未知岗位')
  for r in c['roles']:
   if r['tier'] in ('exact','partial','special') and not any(applies(x,r) for x in c['referrals']):errors.append('候选缺对应内推核查: '+r['id'])
- errors+=validate_research(c)+validate_dimensions(c)
+ errors+=validate_research(c)+validate_dimensions(c)+validate_decisions(c)
  return errors
 
 
@@ -329,12 +334,19 @@ def export_batch(book,batch,full):
  if errors:raise ValueError('; '.join(errors))
  payload={'schema_version':2,'batch_id':batch,'workbook_sha256':source_sha,'full_data_sha256':full['data_sha256'],'companies':companies}
  payload['data_sha256']=digest(companies)
+ frozen=[c for c in companies if c.get('review_mode')=='frozen']
+ if frozen and len(frozen)!=len(companies):raise ValueError('冻结HTML批次不混合自动生成模式')
+ if frozen:
+  from approved_review import manifest
+  binding_errors=[e for c in frozen for e in validate_binding(c,Path(book).resolve().parent)]
+  if binding_errors:raise ValueError('; '.join(binding_errors))
+  payload['approved_reviews']=[manifest(c) for c in frozen]
  if sha(book)!=source_sha:raise ValueError('导出期间工作簿变化，须重读')
- for name in ('公司方案.json','公司核对.html'):
+ for name in (('公司方案.json',) if frozen else ('公司方案.json','公司核对.html')):
   old=out/name
   if old.exists():atomic(out/'历史'/(sha(old)+old.suffix),old.read_bytes())
  atomic(out/'公司方案.json',json.dumps(payload,ensure_ascii=False,indent=2).encode())
- atomic(out/'公司核对.html',render(companies,batch).encode())
+ if not frozen:atomic(out/'公司核对.html',render(companies,batch).encode())
  return payload
 
 def export(book,batch):
@@ -373,7 +385,7 @@ def write(book,batch,data):
   for kind,(_,fields) in SCHEMA.items():
    for item in ([c] if kind=='company' else c.setdefault(kind,[])):
     for k,_ in fields:item.setdefault(k,None if k in NULL_FIELDS|JSON_FIELDS else [] if k in LIST_FIELDS else False if k in BOOL_FIELDS else '')
-  errors=validate_company(c)
+  errors=validate_company(c)+validate_binding(c,Path(book).resolve().parent)
   if errors:raise ValueError('; '.join(errors))
  try:old={c['company_key']:c for c in read(book,batch,allow_legacy=True)}
  except ValueError as exc:
@@ -387,19 +399,24 @@ def confirm(book,batch,key,evidence,html_sha):
  out=paths(book,batch);root=Path(book).resolve().parent
  snapshot=json.loads((out/'公司方案.json').read_text(encoding='utf-8'))
  if snapshot['workbook_sha256']!=sha(book):raise ValueError('Excel刷新后须重新导出核对')
- if sha(out/'公司核对.html')!=html_sha:raise ValueError('用户审核HTML版本不一致')
  companies=read(book,batch)
  if digest(companies)!=snapshot['data_sha256'] or snapshot['companies']!=companies:raise ValueError('JSON与Excel不一致')
- if (out/'公司核对.html').read_text(encoding='utf-8')!=render(companies,batch):raise ValueError('HTML被修改')
  matches=[c for c in companies if c['company_key']==key]
  if len(matches)!=1:raise ValueError('公司身份不唯一')
  c=matches[0]
+ frozen=c.get('review_mode')=='frozen'
+ reviewed=safe_ref(root,c['review_html_ref']) if frozen else out/'公司核对.html'
+ if sha(reviewed)!=html_sha:raise ValueError('用户审核HTML版本不一致')
+ if frozen:
+  binding=validate_binding(c,root)
+  if binding:raise ValueError('; '.join(binding))
+ elif reviewed.read_text(encoding='utf-8')!=render(companies,batch):raise ValueError('HTML被修改')
  errors=validate_company(c)+validate_research(c,True)+priority_evidence_errors(c,root,safe_ref,sha)
  if errors:raise ValueError('; '.join(errors))
  from workbook_store import check_full
  if check_full(book):raise ValueError('完整JSON未同步')
  ref=safe_ref(root,evidence)
- archive=out/'历史'/(html_sha+'.html');atomic(archive,(out/'公司核对.html').read_bytes())
+ archive=out/'历史'/(html_sha+'.html');atomic(archive,reviewed.read_bytes())
  c.update(confirmation_ref=evidence,confirmation_sha256=sha(ref),confirmed_at=now(),confirmed_digest=digest(business(c)),reviewed_html_sha256=html_sha)
  save(book,batch,[c]);return export(book,batch)
 
@@ -414,7 +431,10 @@ def check(book,batch,url=None,target=None):
   if payload.get('schema_version')!=2 or payload.get('batch_id')!=batch:errors.append('交接协议或批次不一致')
   if payload.get('workbook_sha256')!=sha(book):errors.append('Excel/JSON未同步')
   if payload.get('companies')!=companies or payload.get('data_sha256')!=digest(companies):errors.append('JSON内容与Excel不一致')
-  if not (out/'公司核对.html').is_file() or (out/'公司核对.html').read_text(encoding='utf-8')!=render(companies,batch):errors.append('HTML与Excel不一致')
+  frozen=[c for c in companies if c.get('review_mode')=='frozen']
+  if frozen:
+   errors.extend(e for c in frozen for e in validate_binding(c,root))
+  elif not (out/'公司核对.html').is_file() or (out/'公司核对.html').read_text(encoding='utf-8')!=render(companies,batch):errors.append('HTML与Excel不一致')
   targets=[c for c in companies if url is None or any(r['url']==url for r in c['roles'])]
   if not targets or (url and len(targets)!=1):errors.append('交接中没有唯一对应岗位')
   for c in targets:

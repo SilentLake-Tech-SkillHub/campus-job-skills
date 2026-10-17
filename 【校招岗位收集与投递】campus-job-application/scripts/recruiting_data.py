@@ -117,7 +117,11 @@ class RecruitingData:
 
     def artifacts(self, book, batch):
         out = self.batch_path(book, batch)
-        items = [book, storage.full_path(book), out / '公司方案.json', out / '公司核对.html']
+        items = [book, storage.full_path(book), out / '公司方案.json']
+        companies=handoff.read(book,batch)
+        frozen=[c for c in companies if c.get('review_mode')=='frozen']
+        if frozen:items.extend(self.workspace/c['review_html_ref'] for c in frozen)
+        else:items.append(out/'公司核对.html')
         return [{'path': str(p.relative_to(self.workspace)), 'sha256': handoff.sha(p)}
                 for p in items if p.is_file()]
 
