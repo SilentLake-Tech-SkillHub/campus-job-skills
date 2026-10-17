@@ -25,7 +25,7 @@ class ApprovedReviewTests(unittest.TestCase):
    h.write(self.book,self.batch,{'companies':[c]});h.export(self.book,self.batch)
   self.assertEqual((self.root/'final.html').read_bytes(),original)
   self.assertFalse((h.paths(self.book,self.batch)/'公司核对.html').exists())
-  payload=json.loads((h.paths(self.book,self.batch)/'公司方案.json').read_text())
+  payload=json.loads((h.paths(self.book,self.batch)/'公司方案.json').read_text(encoding='utf-8'))
   self.assertEqual(payload['approved_reviews'][0]['review_html_ref'],'final.html')
   self.assertFalse(validate_binding(h.read(self.book,self.batch)[0],self.root))
  def test_changes_rejected_before_book_write(self):
@@ -33,7 +33,7 @@ class ApprovedReviewTests(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'方案不一致'):h.write(self.book,self.batch,{'companies':[c]})
   self.assertEqual(h.sha(self.book),before)
  def test_tampered_html_rejected(self):
-  c=self.frozen();(self.root/'final.html').write_text('被改动')
+  c=self.frozen();(self.root/'final.html').write_text('被改动',encoding='utf-8')
   with self.assertRaisesRegex(ValueError,'HTML哈希不一致'):h.write(self.book,self.batch,{'companies':[c]})
  def test_explicit_decline_cannot_be_selected(self):
   c=self.frozen();c['roles'][0]['application_decision']='decline';c['roles'][0]['decision_ref']='approval.txt';c['roles'][0]['decision_sha256']=h.sha(self.root/'approval.txt');c['review_business_sha256']=business_digest(c)
