@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from structured_dimensions import EXTRA_FIELDS, LIST_FIELDS as DIMENSION_LISTS, NULL_FIELDS, applies, validate as validate_dimensions
+from company_summary import render_summary
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from user_priorities import FIELDS as PRIORITY_FIELDS, validate as validate_priorities, evidence_errors as priority_evidence_errors
@@ -305,6 +306,7 @@ def render(companies,batch):
  parts=['<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>公司投递方案核对</title><style>body{font:16px/1.7 system-ui;background:#f2f5f8;color:#172c3b;margin:0}main{max-width:1200px;margin:auto;padding:32px}section{background:white;padding:28px;margin:24px 0;border-radius:16px}h1,h2,h3{color:#173b56}table{border-collapse:collapse;width:100%;margin:18px 0;font-size:14px}td,th{border:1px solid #dae2e8;padding:10px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}th{background:#e9f0f5}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:#16638a}.note{background:#fff3ce;padding:16px}details{margin:14px 0}summary{cursor:pointer;font-weight:600}</style><main><h1>公司投递方案 · 用户核对版</h1><p>批次 '+esc(batch)+' · Excel 为主记录；此页用于核对，确认不等于最终提交批准。</p>']
  for c in companies:
   parts+=['<section><h2>'+esc(c['name'])+' · '+esc(c['version'])+'</h2><p>'+esc(c['scope'])+'</p><p>已发现计划 '+str(len(c['plans']))+' 个；目录岗位 '+str(len(c['roles']))+' 个；覆盖 '+esc('覆盖完整' if c['coverage']=='complete' else '覆盖未完整')+'；核验 '+esc(c['checked_at'])+'</p><p class="note">缺口：'+esc(c['gaps'] or '本次记录无缺口；仍需核对原始来源')+'</p>']
+  parts+=[render_summary(c)]
   parts+=['<h3>需求与公司范围</h3>',table([{'label':title,'value':('覆盖完整' if c.get(key)=='complete' else '覆盖未完整') if key=='coverage' else val(c.get(key,''))} for key,title in SCHEMA['company'][1] if key not in CONFIRM_FIELDS],[('label','项目'),('value','内容')]),'<h3>可选计划与要求</h3>',records(c['plans'],SCHEMA['plans'][1],'name'),'<h3>计划与岗位条件明细</h3>',table(c['conditions'],SCHEMA['conditions'][1]),'<h3>全部岗位名称目录</h3>',table(c['roles'],[(k,t) for k,t in SCHEMA['roles'][1] if k in ('id','plan_ids','round_id','title','url','bu','cities','city_options','employment','tier')])]
   for tier,title in [('exact','完全符合'),('partial','部分符合'),('special','特殊计划'),('pending','待核实岗位与已采集JD'),('outside','范围外岗位依据')]:
    parts+=['<h3>'+title+'</h3>']
