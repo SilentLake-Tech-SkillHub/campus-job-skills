@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
 metadata:
-  version: "1.8.1"
+  version: "1.8.2"
 ---
 
 # 校招职位刷新与投递协作
@@ -67,8 +67,8 @@ The workflow has two stages. **Stage 1 — first-pass sweep:** process every in-
 
 1. **Open/filter:** first route through preference intake, including batch intent. With no extra hard role/city restriction, open the official broad target-family view; with explicit hard restrictions, use the site's available official role/city filters or search; soft preferences only group the complete in-scope results. In either branch, open and verify every in-scope role-detail page from the visible filtered results in each relevant plan, while retaining that plan's filtered-result page during verification. A result-list page alone does not complete a batch. In `信息收集` mode, **without waiting for the user to select roles**, write or refresh one regional workbook row per verified in-scope role (direct official `岗位链接`, title, location, complete visible JD, BU, plan, `待投递`) and the company's `校招主链接`; read both URL types back from the saved workbook, then close only the eligible agent-created tabs of that company. `待投递` is a tracking default, not the user's selection or permission to apply. In `准备投递` mode keep useful result and verified detail tabs open; recording discovered roles still does not authorize application forms. Report exact deviations such as pagination, missing filters, invalid detail pages, or login gates.
 2. **Record-only:** only when the user explicitly asks to first record every selected role, read all selected role tabs, write or refresh every workbook row, then assess matching from the confirmed résumé and project portfolio. Do not open, fill, upload to, or submit any application form in this mode.
-3. **Record/fill:** complete the company HTML confirmation and Excel/JSON handoff, then route selected roles to the independent job-application-assistant for authorized preparation.
-4. **Submit:** route to job-application-assistant after company handoff. Its current-form approval, exact-target confirmation, receipt verification and Excel/JSON refresh remain required.
+3. **Record/fill:** complete the company HTML confirmation and Excel/JSON handoff, then route selected roles to the current application component registered in the workspace Router for authorized preparation.
+4. **Submit:** route to the current application component after company handoff. Current-form approval, exact-target confirmation and receipt verification remain required. Read its actual capability boundary; the search workflow owns subsequent workbook updates from verified outcomes.
 5. **Refresh/status:** a status request is read-only against the workbook, Plan and research log; it does not authorize opening company pages. For an explicit refresh, reload the workbook first, avoid duplicate role links, preserve submitted rows, and refresh only the exact requested companies and gaps. A partial state does not widen the requested scope.
 6. **Close non-priority tabs:** only after a reviewed batch has highlighted roles and the user has confirmed both the retained role list and the separate tab-closing action. This mode never fills or submits an application.
 
@@ -129,7 +129,7 @@ Use this mode after the current company investigation has a recorded outcome, in
 
 ## Record and fill：交给独立投递流程
 
-先完成[公司 HTML 核对与 Excel/JSON 交接](references/company-review-handoff.md)，用户确认最终计划/岗位/BU/地点/次序后，调用独立 job-application-assistant。复用已确认的公司方案和次序，仅补投递材料、准备授权、执行方式等缺失项。搜索授权不授予填表或提交；一般选岗授权不替换用户已确认方案。最终表单审核与具体目标提交确认仍由投递流程执行。
+先完成[公司 HTML 核对与 Excel/JSON 交接](references/company-review-handoff.md)，用户确认最终计划/岗位/BU/地点/次序后，调用 Router 登记的当前独立申请组件。复用已确认的公司方案和次序，仅补投递材料、准备授权、执行方式等缺失项。搜索授权不授予填表或提交；一般选岗授权不替换用户已确认方案。最终表单审核与具体目标提交确认仍由投递流程执行。
 
 ## Record-only
 
@@ -154,7 +154,7 @@ This is the standing row-organization logic for every regional role sheet listed
 
 ## Submit and verify：独立投递流程负责
 
-只交接已确认且同步的公司方案。投递端复核当前账号名额、岗位与材料，按当前审核版本和确切目标授权提交；回执验证后更新 Excel 的已提交状态，并同步导出 JSON。搜索端不凭“推荐”“待投递”或 HTML 确认直接点击最终提交。
+只交接已确认且同步的公司方案。投递端复核当前账号名额、岗位与材料，按当前审核版本和确切目标授权提交；申请组件仅按其当前契约保存结果；搜索端依据已核实回执另行更新 Excel 并导出 JSON，不要求申请组件同步外部账本。搜索端不凭“推荐”“待投递”或 HTML 确认直接点击最终提交。
 
 ## Verification and records
 
