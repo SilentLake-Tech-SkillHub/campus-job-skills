@@ -57,7 +57,22 @@ def summarize(company):
             'selected_roles': sum(r.get('selected') is True for r in roles)}
 
 
+def company_scan_complete(company):
+    """Only the whole-company research checkpoint can publish this report."""
+    checks = {x['id']: x for x in company.get('research', [])}
+    for key in ('plans', 'catalog', 'jd', 'eligibility', 'rules', 'referrals', 'preferences'):
+        x = checks.get(key, {})
+        if x.get('status') != 'checked' or x.get('gap'):
+            return False
+        if key in ('plans', 'catalog') and (type(x.get('expected_count')) is not int
+                or x['expected_count'] != x.get('observed_count')):
+            return False
+    return True
+
+
 def render_summary(company):
+    if not company_scan_complete(company):
+        return ''
     s = summarize(company)
     def number(item):
         return str(item['count']) if item['status'] == 'verified' else '待核（已发现 '+str(item['observed_count'])+'）'
