@@ -39,4 +39,16 @@ class ApprovedReviewTests(unittest.TestCase):
   c=self.frozen();c['roles'][0]['application_decision']='decline';c['roles'][0]['decision_ref']='approval.txt';c['roles'][0]['decision_sha256']=h.sha(self.root/'approval.txt');c['review_business_sha256']=business_digest(c)
   with self.assertRaisesRegex(ValueError,'不可设为已选'):h.write(self.book,self.batch,{'companies':[c]})
 
+ def test_second_intent_is_not_a_second_application(self):
+  c=self.frozen();second=c['roles'][1];second.update(application_decision='second_intent',decision_ref='approval.txt',decision_sha256=h.sha(self.root/'approval.txt'),selected=False,recommended=False)
+  next(r for r in c['rules'] if r['dimension']=='company').update(limit=1)
+  c['review_business_sha256']=business_digest(c)
+  h.write(self.book,self.batch,{'companies':[c]})
+  saved=h.read(self.book,self.batch)[0]
+  self.assertEqual(sum(r['selected'] for r in saved['roles']),1)
+  self.assertEqual(saved['roles'][1]['application_decision'],'second_intent')
+ def test_second_intent_cannot_also_be_selected(self):
+  c=self.frozen();c['roles'][0].update(application_decision='second_intent',decision_ref='approval.txt',decision_sha256=h.sha(self.root/'approval.txt'));c['review_business_sha256']=business_digest(c)
+  with self.assertRaisesRegex(ValueError,'不可设为已选'):h.write(self.book,self.batch,{'companies':[c]})
+
 if __name__=='__main__':unittest.main()

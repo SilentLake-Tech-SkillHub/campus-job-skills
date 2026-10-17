@@ -24,7 +24,7 @@ def validate_binding(c,root):
             if sha(safe_ref(Path(root),c.get(ref)))!=c.get(expected):errors.append(label+'哈希不一致')
         except (OSError,ValueError):errors.append(label+'不可读取')
     for role in c.get('roles',[]):
-        if role.get('application_decision') not in ('apply','decline','defer'):continue
+        if role.get('application_decision') not in ('apply','decline','defer','second_intent'):continue
         try:
             if sha(safe_ref(Path(root),role.get('decision_ref')))!=role.get('decision_sha256'):errors.append('逐岗决定依据哈希不一致')
         except (OSError,ValueError):errors.append('逐岗决定依据不可读取')
@@ -37,10 +37,10 @@ def validate_decisions(c):
     for r in c.get('roles',[]):
         decision=r.get('application_decision','')
         if not decision:continue  # Legacy data retains its original meaning.
-        if decision not in ('apply','decline','defer','pending'):errors.append('逐岗投递决定无效')
+        if decision not in ('apply','decline','defer','second_intent','pending'):errors.append('逐岗投递决定无效')
         if decision=='apply' and not r.get('selected'):errors.append('投递决定与用户选择不一致')
-        if decision in ('decline','defer','pending') and r.get('selected'):errors.append('未选择投递的岗位不可设为已选')
-        if decision in ('apply','decline','defer') and not (r.get('decision_ref') and r.get('decision_sha256')):errors.append('逐岗决定缺人工依据')
+        if decision in ('decline','defer','second_intent','pending') and r.get('selected'):errors.append('未选择投递的岗位不可设为已选')
+        if decision in ('apply','decline','defer','second_intent') and not (r.get('decision_ref') and r.get('decision_sha256')):errors.append('逐岗决定缺人工依据')
     return errors
 
 def manifest(c):
