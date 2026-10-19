@@ -2,7 +2,7 @@
 
 用于查询、续跑、外部交付验收、合并和用户进展汇报。必须读取当前工作簿的公司备注、所有相关计划状态、最新澄清/版本流水及本届访问证据，不能只读状态枚举或旧摘要。工作簿已使用的“首轮已查”记录必须进入访问判断，即使岗位为空或仍有核验缺口。发现Skill、流水与当前生效表不一致，保留冲突证据，按用户最新明确要求修复，不能静默采用旧解释。
 
-五类盘点结果描述招聘结论；访问史、覆盖完整度、交付接收和合并是独立事实。历史“尚未推进”若有本届检索/公告/页面核查记录，汇报必须明确“首轮已查｜核验未闭环”并列已查范围和缺口；不能只用“尚未推进”概括，更不能计作完全未做或重新入首轮搜索队列。原始标签保留用于审计，不凭关键词批量改判招聘结论。“首轮已查”也不代表官网核验或完整JD已通过。
+状态标签、适用行类型、变更确认和写入由工作区当前 MCP 标签配置及同步脚本统一管理。Skill 不定义标签枚举、空值规则或默认状态，不自行将旧值映射为新值。 历史招聘结论、访问史、覆盖完整度、交付接收和合并是独立事实。历史“尚未推进”若有本届检索/公告/页面核查记录，汇报必须明确“首轮已查｜核验未闭环”并列已查范围和缺口；不能只用“尚未推进”概括，更不能计作完全未做或重新入首轮搜索队列。原始标签保留用于审计，不凭关键词批量改判招聘结论。“首轮已查”也不代表官网核验或完整JD已通过。
 
 ## 必填的覆盖记录
 
@@ -15,7 +15,7 @@
 | cycle/evidence-ambiguous-deferred | 已有线索｜届别或访问证据待确认 | 旧记录缺可靠届别、核查时间或访问依据，无法确认本届实查。保留待核，不能归作完全未做。 |
 | first-pass-unvisited | 尚未访问 | 没有本届尝试证据，也没有需保留的模糊旧记录。仅这一类可进入首轮新搜索队列。 |
 
-交付与汇报前必须运行`python3 scripts/validate_research_progress.py <private-progress.json>`（路径相对此父Skill）。输入为`{"batch_id": "<本批ID>", "preferences": {...}, "roles": [...], "prior_roles": [...], "records": [...]}`。每条包含`id`、`result_status`（五类之一；待分类可为null）、`raw_status`、`coverage_bucket`、`attempt_refs`、`checked_at`、`cycle_ref`、`coverage_refs`、`remaining_gaps`及`merge_status`（`not_merged`/`partially_merged`/`merged`；已合并另有`readback_ref`）。旧交付缺字段时先生成保留原文路径与Hash的审计适配记录，不能修改原文件、杜撰时间或把文件mtime当核查时间。
+交付与汇报前必须运行`python3 scripts/validate_research_progress.py <private-progress.json>`（路径相对此父Skill）。输入为`{"batch_id": "<本批ID>", "preferences": {...}, "roles": [...], "prior_roles": [...], "records": [...]}`。每条包含`id`、`result_status`（历史来源值或null；不作为当前标签规则）、`raw_status`、`coverage_bucket`、`attempt_refs`、`checked_at`、`cycle_ref`、`coverage_refs`、`remaining_gaps`及`merge_status`（`not_merged`/`partially_merged`/`merged`；已合并另有`readback_ref`）。旧交付缺字段时先生成保留原文路径与Hash的审计适配记录，不能修改原文件、杜撰时间或把文件mtime当核查时间。
 
 此脚本检查结构和明显矛盾，不证明外部事实或替代逐项来源核验。只有结构检查及来源/范围核验满足相应阶段，才可接收或合并；失败保留待修，不用非标准`done`绕过。
 

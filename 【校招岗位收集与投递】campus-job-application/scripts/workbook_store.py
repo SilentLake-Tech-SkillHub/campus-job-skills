@@ -149,12 +149,8 @@ def apply_updates(wb, updates, root):
         if len(matches) > 1:
             raise ValueError('复合键匹配多行，须补齐身份: ' + sheet)
         old = {h: ws.cell(matches[0], i).value for h, i in indexes.items()} if matches else {}
-        if old.get('投递状态') == '已提交' and fields.get('投递状态', '已提交') != '已提交':
-            raise ValueError('禁止重置已有提交')
-        if fields.get('投递状态') == '已提交' and old.get('投递状态') != '已提交':
-            safe_ref(root, update.get('receipt_ref', ''))
-        if '投递状态' in fields and fields['投递状态'] not in ('', '待投递', '已提交'):
-            raise ValueError('非法投递状态')
+        if '投递状态' in fields:
+            raise ValueError('旧写入接口不再管理投递状态；请使用当前MCP的状态提议、用户确认及固定同步接口')
         if matches:
             number = matches[0]
         else:

@@ -44,7 +44,7 @@ Provide a concise review package for each role:
 - unresolved or user-only fields;
 - screenshots of the completed form and final submit area.
 
-Keep the form open. `待投递` remains the workbook status.
+Keep the form open. Status changes follow the current MCP policy and user confirmation.
 
 ## Submission gate
 
@@ -52,7 +52,7 @@ Keep the form open. `待投递` remains the workbook status.
 - Re-check the role title, company, résumé, and unresolved warnings immediately before each submission.
 - Submit one role, wait for its result, and verify its receipt before moving to the next.
 - On a timeout, blank page, ambiguous confirmation, or recoverable error, stop retries that could create duplicate applications. Inspect the application center or visible site state first.
-- Mark `已提交` only when a visible receipt or application status verifies success.
+- Preserve visible receipt or application-status evidence; update the status through the current MCP confirmation flow.
 
 ## Screenshots and sensitive data
 

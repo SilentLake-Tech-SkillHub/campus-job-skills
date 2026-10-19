@@ -3,7 +3,6 @@ import json
 import sys
 from preference_contract import validate_snapshot
 
-RESULTS = {"已有相关岗位记录", "无当年校招计划", "无用户要求岗位", "无法访问校招页面", "尚未推进"}
 BUCKETS = {"first-pass-covered", "first-pass-visited-but-unresolved", "cycle/evidence-ambiguous-deferred", "first-pass-unvisited"}
 
 
@@ -35,8 +34,8 @@ def validate(data):
         for field in ["raw_status", "result_status", "coverage_bucket", "checked_at", "cycle_ref", "merge_status"]:
             if field not in row:
                 error("missing " + field)
-        if row.get("result_status") is not None and row.get("result_status") not in RESULTS:
-            error("nonstandard result_status")
+        if row.get("result_status") is not None and not isinstance(row["result_status"], str):
+            error("historical result_status must be text or null; live labels are validated by the current MCP")
         for field in ["attempt_refs", "coverage_refs", "remaining_gaps"]:
             values = row.get(field)
             if not isinstance(values, list) or any(not isinstance(v, str) or not v.strip() for v in values):
