@@ -1,7 +1,7 @@
 interface:
-  display_name: "校招职位刷新与投递"
-  short_description: "校招计划与岗位研究，MCP 固定处理 JSON、Excel 和 HTML 用户核对"
-  default_prompt: "使用 $campus-job-application 读取已确认批次与现有证据，按获批浏览器方式研究计划和岗位，通过 MCP 固定读写 JSON/Excel、生成 HTML 并记录用户对当前版本的明确确认；遵守本批写入时机和申请边界。"
+  display_name: "校招岗位搜索与主表维护"
+  short_description: "按待搜索队列核实官方计划与岗位，经固定脚本写主数据 JSON，状态变更须用户确认"
+  default_prompt: "使用 $campus-job-application 先读求职配置与求职目标，按主数据的待搜索队列核实官方计划和岗位，用 json_excel_sync.py 写入主数据，状态变更先展示“当前→更新”并取得用户确认；不填表、不提交。"
 
 policy:
   allow_implicit_invocation: true

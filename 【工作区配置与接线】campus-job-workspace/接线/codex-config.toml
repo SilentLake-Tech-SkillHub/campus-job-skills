@@ -1,0 +1,41 @@
+# 复制到 <WORKSPACE>/.codex/config.toml（或合并进已有文件），把 <WORKSPACE>、<PYTHON>、<NODE> 换成本机绝对路径。
+
+# 搜索组件：搜索队列与主数据固定读写接口
+[mcp_servers."campus-search"]
+command = "<PYTHON>"
+args = ["<WORKSPACE>/.agents/skills/campus-job-application/scripts/search_mcp.py"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120
+[mcp_servers."campus-search".env]
+CAMPUS_RECRUITING_WORKSPACE = "<WORKSPACE>"
+CAMPUS_SEARCH_PRIVATE_DIR = "<WORKSPACE>/.runtime/search"
+
+# 投递组件（job-application-assistant 仓库，放在 <WORKSPACE>/.agents/skills/job-application-assistant-v2/）。
+# 与搜索端的唯一对接点是 RECRUITING_HANDOFF_DIR=岗位交接/：只读用户正向评审确认后的 投递批次.json 和 公司/ 下的公司文件，结果只写 投递回传.json。
+[mcp_servers."recruiting-login-v2"]
+command = "<NODE>"
+args = ["<WORKSPACE>/.agents/skills/job-application-assistant-v2/scripts/start.mjs", "login"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120
+[mcp_servers."recruiting-login-v2".env]
+RECRUITING_PROFILE_JSON = "<WORKSPACE>/产品管理/网申个人信息主档.json"
+RECRUITING_PRIVATE_DIR = "<WORKSPACE>/.runtime/application"
+RECRUITING_LOGIN_PRIVATE_DIR = "<WORKSPACE>/.runtime/login"
+RECRUITING_BROWSER_PROFILE_DIR = "<WORKSPACE>/.runtime/chrome-profile"
+RECRUITING_IAB_PROFILE_DIR = "<WORKSPACE>/.runtime/iab-profile"
+RECRUITING_HANDOFF_DIR = "<WORKSPACE>/岗位交接"
+RECRUITING_ROLE_QUEUE_DIR = "<WORKSPACE>/.runtime/role-queue"
+
+[mcp_servers."recruiting-application-v2"]
+command = "<NODE>"
+args = ["<WORKSPACE>/.agents/skills/job-application-assistant-v2/scripts/start.mjs", "application"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120
+[mcp_servers."recruiting-application-v2".env]
+RECRUITING_PROFILE_JSON = "<WORKSPACE>/产品管理/网申个人信息主档.json"
+RECRUITING_PRIVATE_DIR = "<WORKSPACE>/.runtime/application"
+RECRUITING_LOGIN_PRIVATE_DIR = "<WORKSPACE>/.runtime/login"
+RECRUITING_BROWSER_PROFILE_DIR = "<WORKSPACE>/.runtime/chrome-profile"
+RECRUITING_IAB_PROFILE_DIR = "<WORKSPACE>/.runtime/iab-profile"
+RECRUITING_HANDOFF_DIR = "<WORKSPACE>/岗位交接"
+RECRUITING_ROLE_QUEUE_DIR = "<WORKSPACE>/.runtime/role-queue"

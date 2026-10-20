@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "name": "岗位状态标签体系",
+  "rowKind": "role",
+  "说明": "岗位状态标签组，同时是搜索组件脚本的主配置（主数据、工作簿、确认台账、名额规则、交接目录的位置）。标签按组存放、一组一个文件，其它组在 labelGroups 登记。",
+  "column": "投递状态",
+  "sheets": [
+    "中国大陆",
+    "香港",
+    "新加坡"
+  ],
+  "rowKinds": {
+    "role": "岗位行：岗位名称或岗位链接非空",
+    "company": "公司行：岗位名称与岗位链接均为空；每家公司在其出现的每张地区表固定一行，有没有岗位都保留"
+  },
+  "labelGroups": [
+    "产品管理/公司状态标签.json"
+  ],
+  "labelGroupRule": "标签按组存放、一组一个文件：本文件为岗位状态组，labelGroups 列出其它组。所有脚本只经 json_excel_sync.load_label_groups 统一加载与校验；各组标签不得重名，岗位行只能用岗位组标签，公司行只能用公司组标签。",
+  "labels": [
+    {
+      "value": "岗位待筛选",
+      "definition": "岗位已经搜索完成，但是岗位用户未确认是否保留或符合用户要求"
+    },
+    {
+      "value": "岗位待投递",
+      "definition": "该岗位用户确认保留，待投递"
+    },
+    {
+      "value": "岗位已投递",
+      "definition": "该岗位用户已经完成投递"
+    },
+    {
+      "value": "岗位不符合用户要求",
+      "definition": "该岗位在筛选后被用户剔除"
+    },
+    {
+      "value": "岗位失效/关闭",
+      "definition": "该岗位已经被用人方关闭"
+    },
+    {
+      "value": "岗位推进中",
+      "definition": "岗位在用人方流程中"
+    },
+    {
+      "value": "岗位终止",
+      "definition": "岗位在流程中结束面试，无offer"
+    },
+    {
+      "value": "岗位offer",
+      "definition": "岗位最终获得offer"
+    }
+  ],
+  "rules": {
+    "nonEmpty": "三张地区表的每一行（含公司行）投递状态必须非空",
+    "singleLabel": "每个公司的每个岗位只能有一个标签，单元格值必须与 labels.value 完全一致，不得追加说明文字；说明写入备注",
+    "onlyDefinedLabels": "只能使用本文件及 labelGroups 中各组文件列出的标签，Agent 不得自创、改写或组合标签",
+    "changeRequiresUserConfirmation": "任何一行的状态变更（包括首次赋值和从旧取值迁移）都必须先向用户展示“当前状态是X，更新状态是Y”，取得用户对该行该变更的明确确认后，才能由固定脚本写入",
+    "decisionAuthority": "保留、剔除、选岗只能由用户决定；Agent 只能提出建议"
+  },
+  "confirmationLedger": "产品管理/投递状态变更确认.json",
+  "masterData": "岗位交接/工作簿全量.json",
+  "workbook": "求职公司清单.xlsx",
+  "syncScript": ".agents/skills/campus-job-application/scripts/json_excel_sync.py",
+  "quotaRule": {
+    "description": "名额收口：用户选择使某个名额范围（公司或公司/BU）在本轮的占用数达到名额上限后，同一范围内剩余处于 autoCloseFrom 的岗位，由固定脚本在同一次用户确认中自动改为 autoCloseTo，并逐行展示“当前→更新”。用户尚未选满名额前，不得因名额剔除任何岗位。 名额规则唯一存放在主数据“投递名额”表（每公司每范围一行，按公司整体覆盖写，只保留最新一版）；收口按“公司总量”行的数字上限执行。",
+    "countsStatuses": [
+      "岗位待投递",
+      "岗位已投递",
+      "岗位推进中",
+      "岗位offer"
+    ],
+    "autoCloseFrom": [
+      "岗位待筛选"
+    ],
+    "autoCloseTo": "岗位不符合用户要求",
+    "quotaSheet": "投递名额"
+  },
+  "fieldRules": "产品管理/表格字段规则.json",
+  "companyStore": {
+    "dir": "岗位交接/公司",
+    "batchFile": "岗位交接/投递批次.json",
+    "forwardReview": "岗位交接/正向评审.html",
+    "thirdPartyHosts": [
+      "nowcoder.com",
+      "51job.com",
+      "zhaopin.com",
+      "liepin.com",
+      "zhipin.com",
+      "lagou.com",
+      "shixiseng.com",
+      "linkedin.com",
+      "yingjiesheng.com",
+      "iguopin.com",
+      "internsg.com"
+    ]
+  }
+}

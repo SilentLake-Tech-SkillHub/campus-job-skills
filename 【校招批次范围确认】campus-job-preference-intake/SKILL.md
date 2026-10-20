@@ -1,53 +1,37 @@
 ---
 name: campus-job-preference-intake
-description: Confirm each campus-recruitment batch's company scope and semantic role families, then resolve material role-boundary questions before official searches.
+description: Confirm each campus-recruitment batch's company scope, intent and execution mode before official searches, reusing the standing rules in the workspace's job-search target file and resolving only material role-boundary questions.
 metadata:
-  version: "1.4.1"
+  version: "2.0.0"
 ---
 
-# 校招岗位偏好确认
+# 校招批次范围确认
 
-Use this Skill in the **Query stage** before a new `Open/filter` batch in a job-search workspace; read its job-search profile (`产品管理/求职配置.md`) for the workbook, regions, target cohort and default role families. It determines this batch's scope and handoff mode only. It does not open a browser page, write the workbook, fill a form, upload a résumé, or submit an application.
+新批次开页搜索之前使用。读取工作区 `产品管理/求职配置.md`（主数据、地区、届别、搜索顺序）和 `产品管理/求职目标.json`（长期选岗规则的唯一来源）。本 Skill 只确认本批范围和交接方式，不开浏览器、不写主数据、不填表、不上传、不提交。
 
-Before any multi-AI allocation, proactively ask about explicit participant/count, grouping, priority, time and quantity requirements. If none, invite the user's ideas rather than requiring a finished plan; an explicit request for recommendations permits a proposal. Derive a readable allocation from the confirmed Query, remaining source scopes, effort and available resources, then confirm it before dispatch. Do not hardcode an industry split, participant count or company target from another batch. Record actual simultaneous tool capacity separately from requested total participants; existing same-batch answers are reused.
+## 长期规则与本批选择
 
-## 范围与偏好确认
+- 岗位顺位、排除红线、城市范围、用工类型、特殊通道和决策红线来自 `求职目标.json`，不每批重问。用户提出新的长期规则或纠正时，直接改写该文件对应条目（覆盖旧内容），并按 [选岗范围与偏好](../campus-job-application/references/preference-contract.md) 执行。
+- 本批特有的选择只在本批有效，不写成长期规则：公司范围、本批意图、执行方式、本批临时增加的限制。
 
-先读取 [偏好与证据契约](../【校招岗位收集与投递】campus-job-application/references/preference-contract.md) 和 [空模板](../【校招岗位收集与投递】campus-job-application/references/preference-template.md)。复述硬范围和三个独立偏好轴，明确实习政策；不限城市保留城市排序，弱优先/平级/未知按原话记录。任何跨轴取舍不自动加权。更新仅复用原 JD 及用户指定复查范围，已投和明确选岗保留，首轮不重启。
+## 确认步骤
 
-## Intake
+1. 读当前请求和本批已有的明确选择。区分用户原话和你的理解。确定**公司范围**：默认按主数据“待搜索”公司的行序；用户点名的公司或行业优先。同时判断是第一轮搜索还是用户点名的补查；已查但有缺口的公司不因此重开。
+2. 当请求与 `求职目标.json` 的规则有实质出入，或岗位族边界不清（例如“AI + 互联网产品经理”可能指互联网公司的 AI 产品岗，也可能同时包括普通互联网产品岗），先用一两句话复述理解并给出具体选项，一次只问一个问题，直到用户确认。Agent 的推断不算用户确认。范围未定时，不开页筛选；只读对比和去重可以继续。
+3. 产品经理、AI 产品经理、产品运营、商业化/广告产品、管培生、用户研究、数据分析是不同岗位族，除非用户合并。标题和分类用来发现候选，完整 JD 的实际职责决定是否纳入。
+4. 确认**本批意图**：`本轮只是收集岗位信息，还是准备选岗并投递简历？` 记为“信息收集”或“准备投递”。它决定窗口的保留与关闭；两种意图都把每个已核岗位写入主数据，都不授权填表、上传或提交。
+5. 用工类型以 `求职目标.json` 为准；本批要求不同（如单独的实习批次）时向用户确认。网站的 `Full Time` 标签不能证明面向应届生。
+6. 不把某一批的选择升级为长期默认，也不因主表有多个地区就扩大到其他地区。
 
-1. Read the current request, the latest clarification entry, this batch's Query snapshot in its living Plan, the workbook queue, and explicit earlier choices for this same batch. Keep the user's raw wording distinct from your interpretation. Resolve the **company set** (company/list or industry), region (one or more regions from the job-search profile), graduating class, and whether this is a subset of a wider approved plan. Also identify whether the user is continuing the first-pass sweep or has selected a targeted follow-up. Do not treat a company's `部分盘点` state as an instruction to revisit it; after the first pass, resume only exact gaps selected by the user. Do not promote one batch's choice into a permanent Skill default or expand a single-region request to other regions because the workbook has several sheets.
-2. Before any company-page opening or role filtering, make a compact **semantic scope recap** in plain language and separate: (a) target company/domain, (b) job function and level, (c) included role families, (d) excluded role families, (e) boundary examples, (f) employment type, (g) hard location scope and separate location preference, and (h) collection/application intent. For role queries, distinguish the domain of the employer from the work the role performs. For example, “AI + internet product manager” could mean AI-product roles at internet firms, both AI PM and general internet PM roles, or another scope; do not silently choose one.
-3. Treat related job families as distinct unless the user joins them: product manager, AI product manager/AI Builder, product operations, commercial/advertising product, general management trainee, user research, and data analysis are separate families. Once the family boundary is confirmed, use **both title and complete visible JD**: titles, categories, and synonyms find candidates; actual duties in the JD decide inclusion. Inspect roles with PM duties even when the title lacks “Product Manager”, and reject or flag titles containing “Product Manager” when the JD is substantively operations or support. A product-category label or keyword is discovery evidence, not proof of inclusion. Ask about exclusions where the user's stated goal or examples leave a material boundary unclear.
-4. If any ambiguity can change which companies, plans, or jobs are included, ask one concise question at a time with concrete alternatives. After the answer, update the recap and ask the next question only for a remaining material ambiguity. Continue these short Query rounds until the user confirms the full recap or gives a clear final definition. A recap of an agent-inferred interpretation is not user confirmation. Do not open/filter role pages under an unresolved scope; workbook-only comparison, deduplication, and source/coverage audits may continue if they do not commit to a disputed interpretation.
-5. Record the raw Query, normalized inclusions and exclusions, examples/boundaries, user-confirmation status, batch ID, effective timestamp, current sweep stage, first-pass stopping point, and any older interpretation it replaces in `产品管理/clarification.md` and the current living Plan. Mark unresolved dimensions as pending; never write an inferred scope as confirmed. Reuse a confirmed scope in later turns of the same batch and ask again only when a new or contradictory Query makes a material dimension uncertain. Future batches require their own scope and timestamp.
-6. Confirm the **current batch intent**: `本轮只是收集岗位信息，还是准备选岗并投递简历？` Record `信息收集` or `准备投递` before opening a new company window. If already stated for this batch, acknowledge and reuse it. This choice controls window retention and handoff. **Both** modes record each verified in-scope role in Excel; neither mode authorizes filling forms, uploading a résumé, or submitting.
-7. Resolve employment type from the current request and batch context: formal graduate/full-time, internship, or both. Ask if materially unresolved. For a formal campus batch, resolve internship_policy explicitly. conversion_last includes only officially stated conversion internships in the same report at the lowest priority, regardless of formal coverage or available formal roles; ordinary internships stay out. A site's `Full Time` label does not prove graduate eligibility.
-8. Reuse role and city preferences already stated for this batch. If genuinely unspecified, ask whether the user wants more restrictions or no additional preference; keep that question separate from the semantic role-family confirmation above.
-9. Treat region, cohort, employment type, role family, role content, city, and batch intent as separate dimensions. A site's default or stale `Intern` filter must not override the resolved scope. Until material choices are confirmed, continue only independent read-only work that cannot predetermine them; do not open a company window with an unresolved retention mode.
+## 执行方式
 
-## Search execution mode
+开页之前与其他缺失选择一起问：`本轮岗位搜索由一个 AI 执行，还是由多个 AI 共同执行？` 同一批已明确回答的直接沿用；没有回答不能视为同意并行。选多个 AI 时，再确认参与者人数、协调者、平台子任务还是用户手动转交、可用资源，以及对分工、优先级、时间或数量的要求；没有明确要求时请用户说想法，或在用户要求时给出有理由的方案，确认后才派发。实际同时可用的工具能力与用户希望的总人数分开记录。双浏览器并发属于同一执行者的两个通道，按 [搜索 MCP](../campus-job-application/references/search-mcp.md) 执行。
 
-Before this new batch opens or filters employer pages, ask `本轮岗位搜索由一个 AI 执行，还是由多个 AI 共同执行？` with the other missing scope choices. Record `search_execution_mode` (`single` or `parallel`) and user-choice evidence in this private batch. Reuse an explicit same-batch choice; an already stated multi-AI request requires only remaining participant/count, coordinator, platform-versus-manual-handoff and resource decisions. Do not infer consent from no response. Independent offline comparison may continue while the mode is pending.
+## 路由
 
-Return the choice and missing coordination facts to the search parent. It routes confirmed parallel research to its `campus-job-parallel-search` subskill; single-AI research retains the normal flow. A search choice does not choose or authorize application execution mode. Future batches ask anew unless the user explicitly supplies that batch's choice.
+- **无额外限制**：按已确认岗位族打开官网的常规视图。准备投递时保留页面供用户选择；信息收集时把每个已核岗位的直链和 JD 写入主数据后，才关闭该公司的可关闭窗口。
+- **有硬性限制**：只用这些限制在网站可见的筛选或搜索里过滤；排序偏好只排列结果，不排除低优先级的城市或方向。网站没有对应筛选时，用最接近的官方视图核验并报告缺失的筛选，不悄悄扩大或换成别的城市、岗位族。
 
-## Route
+## 交给搜索主 Skill
 
-- **User-selection branch:** When the user has no additional hard role or city restriction, open the official campus page using the normal broad view of the confirmed role family. In `准备投递` mode keep it open for the user to choose exact applications; in `信息收集` mode record **every verified in-scope role and its direct link/JD in Excel** before eligible company-window closure. User selection is required for form work, **not** for an information-only role row.
-- **Preference-filtered branch:** When the user provides a hard role or city restriction, use only those stated restrictions in the site's visible filters or search. Soft preferences organize results and do not exclude lower-ranked cities or directions. Keep the confirmed role-family constraint where the site supports it. If a stated filter is unavailable, use the closest official view for verification and report the missing filter; do not silently broaden or substitute a different city or role family. Retain the view for handoff only in `准备投递` mode.
-
-## Handoff
-
-Report the exact company/industry and region set, graduating class, batch intent, employment type, role and city preferences, selected branch, search execution mode and coordination decision evidence to `campus-job-application`. Record these as **per-batch decisions**, not permanent defaults. Before reporting a zero-result search, verify the site's selected employment-type chips or checkboxes against that scope, then separately verify cohort eligibility and experience requirements from the plan or JD. A preference is a browsing instruction, not a promise that matching roles will exist and not authorization for application filling or submission.
-
-## 公司方案的三档与确认
-
-读取[公司机会核对与交接](../【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)。确认用户明确岗位类型与软倾向，供完全符合/部分符合判断；不把用户产品、商家产品等标题写死为某档。先发现并展示具体特殊计划的培养路径、要求及名额影响，再问是否考虑，不能仅问抽象的“要不要管培”。初始 Query 不要求用户预先知道所有计划。完整目录包含适用计划所有岗位名称；职责/城市硬范围控制候选和推荐。最终由用户在 HTML 中确认具体选择，写回 Excel 并同步 JSON；一般准备授权不代替公司方案确认。
-
-## 数据建设闭环
-
-执行[数据建设与固定脚本](../【校招岗位收集与投递】campus-job-application/references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、九张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。
-
-用户明确选择搜索 MCP 双浏览器并发时，继承搜索主 Skill 的 search-mcp 引用，两个浏览器处理不同独立任务；用户公司／BU内志愿顺序按公司交接契约单独保存，不替代官网志愿机制。
+把本批的公司与地区、届别、本批意图、用工类型、路由、执行方式和并行分工交给 `campus-job-application`，作为本批决定，不作为长期默认。汇报零结果前，先核对网站实际选中的用工类型筛选，再分别核对计划或 JD 中的届别和经验要求。偏好只是浏览指令，不保证存在匹配岗位，也不授权填写或提交。

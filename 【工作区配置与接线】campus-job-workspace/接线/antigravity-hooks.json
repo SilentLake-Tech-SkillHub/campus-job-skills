@@ -1,0 +1,30 @@
+{
+  "recruiting-status-sync": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host agy --event SessionStart",
+        "timeout": 10
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host agy --event PreInvocation",
+        "timeout": 10
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host agy --event PreToolUse",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

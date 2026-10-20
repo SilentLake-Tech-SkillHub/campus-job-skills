@@ -1,0 +1,60 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host claude",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host claude",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host claude",
+            "timeout": 5
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host claude",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"<PYTHON>\" \"<WORKSPACE>/.agents/skills/campus-job-application/scripts/status_sync_hook.py\" --workspace \"<WORKSPACE>\" --host claude",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

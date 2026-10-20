@@ -1,73 +1,101 @@
 #!/usr/bin/env python3
-"""MCP entry point for dual-browser search; private runtime supplied by environment."""
+"""campus-search MCP：多浏览器搜索任务队列，以及主数据 JSON 的固定读写接口（薄封装 json_excel_sync.py）。"""
+import json
 import os
+import sys
 from mcp.server.fastmcp import FastMCP
 from search_queue import Queue
-from recruiting_data import RecruitingData
 
-server=FastMCP('campus-search',instructions='Coordinate the recruiting research and data workflow: dual-browser search, private structured JSON drafts, version-bound Excel updates/readback, complete JSON and fixed HTML review exports, explicit user confirmation and handoff checks. No login, application, filling or submission. Initialization, research completion and user confirmation are distinct. Respect the approved batch write timing.')
+server=FastMCP(
+    'campus-search',
+    instructions=(
+        '校招搜索与主数据接口：搜索任务队列（公司租约、证据收回、分轮检查）和主数据 JSON 的固定读写。'
+        '不登录、不填表、不提交申请。'
+        '主数据是工作区 岗位交接/工作簿全量.json；AI 只读 JSON，不读不改 Excel，Excel 只能由 recruiting_json_write_excel 写出。'
+        '用户求职目标与选岗规则只在工作区 产品管理/求职目标.json。'
+        '选岗、去留、顺序由用户决定；不得因名额提前剔除任何符合要求的岗位，只展示符合要求的岗位和名额限制。'
+        '任何投递状态变更先 recruiting_status_propose，把“当前状态是X，更新状态是Y”原样给用户看，用户确认后才 recruiting_status_confirm。'
+    )
+)
+
+SYNC_SCRIPT=os.path.join(os.path.dirname(os.path.abspath(__file__)),'json_excel_sync.py')
 
 
-def data_store():
+def run_sync(*args, items=None):
+    """调用唯一的主数据读写脚本；所有门禁在脚本内执行。"""
+    import subprocess, tempfile
     workspace=os.environ.get('CAMPUS_RECRUITING_WORKSPACE')
-    private=os.environ.get('CAMPUS_SEARCH_PRIVATE_DIR')
-    if not workspace or not private:
-        raise ValueError('数据接口需要配置CAMPUS_RECRUITING_WORKSPACE及私有目录')
-    return RecruitingData(workspace,private)
+    if not workspace:raise ValueError('需要配置CAMPUS_RECRUITING_WORKSPACE')
+    cmd=[sys.executable,'-B',SYNC_SCRIPT,'--workspace',workspace,*args]
+    tmp=None
+    if items is not None:
+        tmp=tempfile.NamedTemporaryFile('w',suffix='.json',delete=False,encoding='utf-8');json.dump(items,tmp,ensure_ascii=False);tmp.close();cmd+=['--input',tmp.name]
+    try:
+        p=subprocess.run(cmd,capture_output=True,text=True,encoding='utf-8')
+    finally:
+        if tmp:os.unlink(tmp.name)
+    if p.returncode not in (0,1) or (p.returncode==1 and not p.stdout.strip()):raise ValueError((p.stderr or p.stdout).strip())
+    return json.loads(p.stdout)
 
 
 @server.tool()
-def recruiting_data_open(workbook:str,batch:str)->dict:
-    """Quickly expand workbook/JSON status and structured schema; no Excel mutation."""
-    return data_store().open(workbook,batch)
+def recruiting_status_propose(items:list[dict])->dict:
+    """只读：生成“当前状态是X，更新状态是Y”（含名额收口派生变更）。必须原样展示给用户并取得明确确认。"""
+    return run_sync('propose',items=items)
 
 
 @server.tool()
-def recruiting_data_query(workbook:str,company:str|None=None,sheet:str|None=None,offset:int=0,limit:int=30)->dict:
-    """Read a company or sheet from synchronized full JSON with pagination."""
-    return data_store().query(workbook,company,sheet,offset,limit)
+def recruiting_status_confirm(items:list[dict],user_quote:str,confirmation_ref:str='')->dict:
+    """用户明确确认 propose 展示的变更后调用：记入确认台账并更新主数据 JSON，不写 Excel。"""
+    return run_sync('confirm','--quote',user_quote,'--ref',confirmation_ref,items=items)
 
 
 @server.tool()
-def recruiting_draft_put(workbook:str,batch:str,data:dict)->dict:
-    """Save an immutable structured exchange draft; does not mark facts or user approval verified."""
-    return data_store().draft_put(workbook,batch,data)
+def recruiting_rows_upsert(items:list[dict])->dict:
+    """按业务键增改主数据 JSON 的非状态字段（新岗位、JD、链接）；不能改投递状态。"""
+    return run_sync('upsert',items=items)
 
 
 @server.tool()
-def recruiting_draft_get(workbook:str,batch:str,draft_ref:str,draft_sha256:str)->dict:
-    """Read the exact hashed draft bound to this workbook and batch."""
-    return data_store().draft(workbook,batch,draft_ref,draft_sha256)
+def recruiting_json_write_excel()->dict:
+    """JSON→Excel 唯一写入：标签门禁、状态确认门禁、写出、逐格读回。仅在用户选择“现在写入”后调用。"""
+    return run_sync('write')
 
 
 @server.tool()
-def recruiting_data_initialize(workbook:str,batch:str,sheet:str,scope:str,expected_sha256:str,company:str|None=None)->dict:
-    """Initialize research tables through fixed code only at the batch-authorized write stage."""
-    return data_store().initialize(workbook,batch,sheet,scope,expected_sha256,company)
+def recruiting_sync_pending()->dict:
+    """是否存在未写入 Excel 的 JSON 改动，以及用户是否已选择下一轮再写入。"""
+    return run_sync('pending')
 
 
 @server.tool()
-def recruiting_data_commit(workbook:str,batch:str,draft_ref:str,draft_sha256:str,expected_sha256:str)->dict:
-    """Validate and commit a draft to Excel, read back and refresh full/batch JSON and fixed HTML."""
-    return data_store().commit(workbook,batch,draft_ref,draft_sha256,expected_sha256)
+def recruiting_write_defer(user_quote:str)->dict:
+    """用户选择“下一轮再写入”时登记，绑定当前 JSON 数据摘要。"""
+    return run_sync('defer','--quote',user_quote)
 
 
 @server.tool()
-def recruiting_review_refresh(workbook:str,batch:str,expected_sha256:str)->dict:
-    """Export all existing batches and fixed HTML from current Excel; never import an old snapshot."""
-    return data_store().refresh(workbook,batch,expected_sha256)
+def recruiting_status_check()->dict:
+    """校验标签体系、名额收口、JSON 与 Excel 差异。"""
+    return run_sync('check')
 
 
 @server.tool()
-def recruiting_review_confirm(workbook:str,batch:str,company_key:str,evidence_ref:str,html_sha256:str,expected_sha256:str)->dict:
-    """Record existing explicit user approval of exact HTML; enforce research/ranking evidence. No application authority."""
-    return data_store().confirm(workbook,batch,company_key,evidence_ref,html_sha256,expected_sha256)
+def recruiting_data_query(company:str|None=None,sheet:str|None=None,offset:int=0,limit:int=30)->dict:
+    """只读：按公司或工作表分页读取主数据 JSON。"""
+    args=['query','--offset',str(offset),'--limit',str(limit)]
+    if company:args+=['--company',company]
+    if sheet:args+=['--sheet',sheet]
+    return run_sync(*args)
 
 
 @server.tool()
-def recruiting_handoff_check(workbook:str,batch:str,url:str|None=None)->dict:
-    """Check Excel/full JSON/batch JSON/HTML and user approval before handoff; never submit."""
-    return data_store().check(workbook,batch,url)
+def recruiting_company_report(companies:list[str])->dict:
+    """只读：按公司汇报主链接、校招计划（含管培/产培）、岗位按投递状态计数与列表、投递名额与占用、剩余名额。"""
+    if not companies:raise ValueError('至少指定一家公司')
+    args=['report']
+    for c in companies:args+=['--company',c]
+    return {'reports':run_sync(*args)}
 
 
 def queue():

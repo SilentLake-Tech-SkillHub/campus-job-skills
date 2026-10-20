@@ -1,44 +1,28 @@
 # campus-job-skills
 
-**当前主 Skill：v1.8.1 · 2026-10-17**
+**当前版本：v2.0.0 · 2026-10-21**
 
-## 本次更新：完整招聘研究与数据核对 MCP
+## 本次更新：主数据 JSON、标签分组与搜索→投递中间区域
 
-同一 MCP 现在覆盖从双浏览器搜索到用户核对的数据流程。Chrome 和内置浏览器默认各并发处理 10 家独立公司，合计最多 20 家；同公司的多个计划和岗位共用公司名额，页面数量与窗口分组单独管理；收集后的资料先保存为结构化 JSON 草稿，再由固定代码写入 Excel、读回核对、同步整本业务 JSON 与批次 JSON，并生成固定格式 HTML。用户调整后重新生成，明确确认当前版本后才记录确认。
+这一版把账本的写入方式整体换成“一份主数据、固定脚本写、用户逐行确认”，并新增 [工作区配置与接线](【工作区配置与接线】campus-job-workspace/README.md) 组件，三个 Skill 加上这个组件就是一个能直接运行的完整工作区。
 
-初始化可以只读展开现有 Excel 的表头、公司数及 JSON 同步状态，再按公司或工作表分页读取。只读展开不会创建明细表；建立研究表和正式写入仍遵守用户批准的时机。每次写入检查工作簿与草稿 Hash，保留原有记录、备份和已提交状态。
+- **唯一主数据**：`岗位交接/工作簿全量.json` 是唯一主数据，Excel 只给人看，由 `json_excel_sync.py write` 从 JSON 写出并逐格读回。每类信息只有一个存放位置、只保留最新一版，回滚靠 git。
+- **标签分组**：状态标签一组一个文件。岗位行只用岗位组（岗位待筛选、岗位待投递、岗位已投递等），公司行只用公司组（待搜索、公司无合适岗位、已有岗位、不再搜索（用户已处理）、并入集团）。所有脚本经同一入口加载，写入前统一检查。
+- **公司行固定保留**：每家公司在每张地区表固定一行公司行，有没有岗位都保留，新增岗位不占用公司行。
+- **用户逐行确认**：任何状态变更先展示“当前状态是X，更新状态是Y”，用户确认后才写入；名额收口只在用户的选择占满名额后由脚本执行。
+- **中间区域**：搜索端生成公司文件、投递批次与正向评审页，用户确认后投递端才接收；投递结果写回传文件，经反向评审、用户确认后才写回主表。见 [岗位交接/说明.md](【工作区配置与接线】campus-job-workspace/岗位交接/说明.md)。
+- **Hook 门禁**：标签与确认门禁、Excel 只读、交接目录固定文件、组件只读开关，在 Codex、Claude Code、Antigravity 中统一生效。
 
-| 环节 | MCP 工具 |
+| 环节 | 入口 |
 |---|---|
-| 搜索与证据 | `search_batch_create`、`search_dispatch`、`search_result_record`、逐轮检查与恢复 |
-| 初始化与快速展开 | `recruiting_data_open`、`recruiting_data_query`、`recruiting_data_initialize` |
-| 结构化 JSON 到 Excel | `recruiting_draft_put/get`、`recruiting_data_commit` |
-| HTML、用户调整与确认 | `recruiting_review_refresh`、`recruiting_review_confirm`、`recruiting_handoff_check` |
-
-MCP 复用 Skill 内已有的固定存储与模板代码。Excel 是主记录；草稿 JSON 是交换输入，完整及批次 JSON 是同版本导出。生成、打开 HTML 和用户明确确认分别记录。接口不授予登录、填写或提交申请的权限。调用及部署见[数据 MCP](【校招岗位收集与投递】campus-job-application/references/recruiting-data-mcp.md)与[双浏览器搜索](【校招岗位收集与投递】campus-job-application/references/search-mcp.md)。
-
-每家公司还会请你确认岗位志愿顺序：不分 BU 时公司内排序，分 BU 时各 BU 独立排序。用户顺序单独保存到 Excel/JSON/HTML；官网的平行或无志愿机制继续独立保留。
-
-## 投递前先核对整家公司
-
-搜索端先查清公司全部适用计划，列出计划内所有岗位名称，再按“完全符合、部分符合、特殊计划”展示候选及完整 JD。随后给出最终推荐，说明各轮次、计划、BU 或公司层面的投递数量、共享名额、冷冻期和撤回后果，并在这一阶段查齐内推码及适用范围。规则未披露、目录没查全和码未找到都会明确展示。
-
-你通过 **HTML 公司核对页**看计划、完整目录、候选 JD、最终推荐和投递规则，再决定最终选哪些岗位。决定写回 **Excel 主记录**，同步导出 **JSON 交接文件**。每次刷新 Excel 和 JSON 一起更新；影响选择的变化须重新核对。投递助手只接收已确认、同版本且包含该岗位的方案，后面的表单审核与最终提交确认继续保留。
-
-| 文件 | 用途 |
-|---|---|
-| Excel | 主记录，保留原岗位/计划表，新增公司核对、计划明细、岗位目录、投递规则、内推信息、志愿明细、研究检查、条件明细、用户志愿九张共享明细表 |
-| HTML | 供用户完整核对计划、岗位、推荐、规则、内推和最终选择 |
-| 完整 JSON | 整本 Excel 所有业务表、原列、历史行、公式、备注和超链接 |
-| 批次 JSON | 当前公司方案与相关原表行，绑定完整 JSON 和 Excel 版本，供投递端校验 |
-
-![公司HTML核对页（合成场景）](docs/images/company-review-synthetic.png)
-
-支持先整理 UTF-8 草稿 JSON，再写入 Excel 并读回生成 JSON/HTML；文件保存在私有工作簿旁的 `岗位交接/<批次>/`。整本业务数据另存为 `岗位交接/工作簿全量.json`，每次统一刷新。手动修改 Excel 后需重新导出，投递端会阻断陈旧快照。固定命令和增量输入见[数据建设流程](【校招岗位收集与投递】campus-job-application/references/storage-workflow.md)。
-
-图中是工具实际生成的合成测试页面，用于展示格式，不代表真实公司核验或用户批准。完整契约及命令见[公司核对与交接](【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)。
+| 搜索与证据 | 搜索 MCP `campus-search`（`search_mcp.py`） |
+| 主数据读写与状态确认 | `json_excel_sync.py`：`query`、`report`、`upsert`、`propose`、`confirm`、`write`、`set-quota-rules` |
+| 搜索 → 投递交接 | `company_store.py`：`refresh`、`set-order`、`forward`、`forward-confirm`、`reverse`、`reverse-confirm` |
+| 门禁 | `status_sync_hook.py` |
 
 ## 更新日志
+
+- **v2.0.0 · 2026-10-21**：主数据改为 `工作簿全量.json`，Excel 由脚本写出；状态标签按组分文件并统一检查，公司行固定保留；新增搜索→投递中间区域（公司文件、投递批次、正向/反向评审）；新增“工作区配置与接线”组件。删除旧的 Excel 主记录、九张共享表、公司方案与 HTML 核对页代码栈。
 
 - **v1.8.1 · 2026-10-17**：默认 Chrome 10 家公司＋内置浏览器 10 家公司，按公司租约计数；原子补位、共享来源互斥及页面分组独立检查。173 项本地测试通过，含真实 MCP 协议测试；派发成功仍须宿主实际访问和回收证据。[Issue #16](https://github.com/SilentLake-Tech-SkillHub/campus-job-skills/issues/16)
 
@@ -159,9 +143,9 @@ AI 从账本里取一家首轮还没查过的公司,先核实当年的官方校�
 
 ## 我应该准备什么材料?
 
-1. **建一个求职工作目录**,放进你的 Excel 求职账本和简历文件夹。没有账本的话,可以从 `samples/` 里那份样例开始。
-2. **把五个 Skill 目录复制到 AI 助手的 Skill 目录**(见下一节)。
-3. **建求职配置**:按 `【校招岗位收集与投递】campus-job-application/references/profile-template.md` 在工作目录建立 `产品管理/求职配置.md`,填入账本、地区表、目标届别、岗位方向、简历位置。Skill 本身不含任何个人取值,全部从这份配置读;缺失时 AI 会先问你再创建。
+1. **建一个求职工作目录**，把三个 Skill 目录复制到 `<工作目录>/.agents/skills/`（目录名去掉中文前缀）。
+2. **初始化工作区**：按 [工作区配置与接线](【工作区配置与接线】campus-job-workspace/README.md) 运行 `初始化工作区.py`，放入标签组、字段规则、求职目标骨架、交接目录和空账本，再按 `接线/` 配好 Hook 与 MCP。
+3. **填写求职目标**：在 `产品管理/求职目标.json` 填入岗位顺位、排除红线、城市、在用简历等。Skill 本身不含任何个人取值，全部从这里读；缺失时 AI 会先问你再写入。
 
 然后对 AI 说一句"开始新一批校招信息收集"就行。
 
@@ -229,27 +213,28 @@ AI 从账本里取一家首轮还没查过的公司,先核实当年的官方校�
 ```text
 campus-job-skills/
 ├── README.md
-├── docs/
-│   ├── images/                         README 里的账本截图
-│   └── flow/                           模块总览图、各模块与子模块的内部流程图
-├── samples/
-│   └── internet-product-job-search-sample.xlsx   互联网产品搜索的样例账本
+├── docs/                                 README 截图与各模块流程图
+├── samples/                              样例账本
 ├── 【校招批次范围确认】campus-job-preference-intake/
-│   └── SKILL.md                        模块 ①:确认范围、本轮意图、搜索方式
+│   └── SKILL.md                          模块 ①：确认范围、本轮意图、搜索方式
 ├── 【校招计划盘点】campus-job-plan-inventory/
-│   └── SKILL.md                        模块 ②:核实官方入口,盘点各计划
-└── 【校招岗位收集与投递】campus-job-application/
-    ├── SKILL.md                        模块 ③:逐公司收集岗位,汇报与补查
-    ├── agents/openai.yaml
-    ├── references/
-    │   ├── profile-template.md         求职配置模板
-    │   ├── workbook-schema.md          账本的表结构与取值
-    │   ├── browser-and-submission-gates.md   浏览器与提交的门禁
-    │   └── research-progress.md        研究进度与覆盖核对
-    ├── scripts/validate_research_progress.py
-    └── skills/
-        ├── campus-job-parallel-search/ 多个 AI 并行搜索的协作
-        └── campus-job-referral-code/   内推码的查询与核实
+│   └── SKILL.md                          模块 ②：核实官方入口，盘点各计划
+├── 【校招岗位收集与投递】campus-job-application/
+│   ├── SKILL.md                          模块 ③：逐公司收集岗位、选岗、交接与回写
+│   ├── references/                       表结构、浏览器与提交门禁、研究进度、搜索 MCP 等
+│   ├── scripts/
+│   │   ├── json_excel_sync.py            主数据唯一读写、标签分组检查、JSON→Excel
+│   │   ├── company_store.py              搜索→投递中间区域：公司文件、批次、正向/反向评审
+│   │   ├── status_sync_hook.py           门禁 Hook
+│   │   ├── search_mcp.py / search_queue.py   搜索 MCP 与任务队列
+│   │   └── test_*.py                     测试
+│   └── skills/                           子模块：多 AI 并行搜索、内推码查询
+└── 【工作区配置与接线】campus-job-workspace/
+    ├── 初始化工作区.py                    新建工作区
+    ├── AGENTS.md                         工作区执行入口
+    ├── 产品管理/                          标签组、字段规则、求职目标骨架、维护开关、确认台账
+    ├── 岗位交接/                          中间区域说明与公司目录
+    └── 接线/                              Hook 与 MCP 配置示例
 ```
 
 本仓库由 [SilentLake-Tech-SkillHub](https://github.com/SilentLake-Tech-SkillHub) 维护。

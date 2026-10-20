@@ -10,11 +10,10 @@ import uuid
 
 CHANNELS=('chrome','iab')
 DEFAULT_COMPANIES_PER_CHANNEL=10
-STAGES=('collection','verification','structuring','recommendation')
+# 两轮：collection 收集计划与岗位目录，verification 核验 JD/资格/规则/内推。之后由协调者用 json_excel_sync.py upsert 写主数据。
+STAGES=('collection','verification')
 CHECKS={1:{'company_identity','cohort','plans_enumerated','catalog_pages_enumerated','counts_reconciled','source_saved'},
-        2:{'plans','catalog','jd','eligibility','rules','referrals','preferences'},
-        3:{'typed_fields','foreign_keys','counts','source_provenance','history_preserved'},
-        4:{'hard_scope','three_tiers','qualification','quota_matrix','special_plan_decisions','selection_preserved'}}
+        2:{'plans','catalog','jd','eligibility','rules','referrals','hard_scope'}}
 
 
 def sha(path):
@@ -137,15 +136,6 @@ class Queue:
                     if len(set(ids))!=len(ids) or any(not x.get('title' if name=='roles' else 'name') for x in items):raise ValueError('Inventory identity/name missing or duplicate')
                 pids={p['id'] for p in plans}
                 if any(not r.get('plan_ids') or not set(r['plan_ids'])<=pids for r in roles):raise ValueError('Inventory role plan mismatch')
-            if t['stage']>=3:
-                import company_handoff as h
-                c=json.loads(self.ref(e['company_payload_ref']).read_text(encoding='utf-8'))
-                if c['company_key']!=t['company']:raise ValueError('Company payload mismatch')
-                # A structured unknown stays unknown; research and user-confirmation
-                # readiness are checked separately by the application handoff gate.
-                errors=h.validate_company(c)+h.validate_research(c)
-                if errors:raise ValueError('; '.join(errors))
-                if not any(a['path']==e['company_payload_ref'] for a in artifacts):raise ValueError('Company payload must be hashed')
             status='checked' if all(e['checks'].values()) and not e['gaps'] else 'blocked'
             db.execute('UPDATE tasks SET status=?,evidence=?,evidence_sha=?,gap=? WHERE id=?',
                        (status,evidence_ref,sha(path),json.dumps(e['gaps'],ensure_ascii=False),task_id))
@@ -186,7 +176,7 @@ class Queue:
         with self.db() as db:
             stage=db.execute('SELECT stage FROM batches WHERE id=?',(batch,)).fetchone()['stage']
             if stage!=result['stage']:raise ValueError('Round changed concurrently')
-            if stage>=4:raise ValueError('Research stages finished; workbook write and user HTML review remain separate gates')
+            if stage>=len(STAGES):raise ValueError('Research rounds finished; write verified results to the master JSON with json_excel_sync.py upsert')
             db.execute('UPDATE batches SET stage=stage+1 WHERE id=?',(batch,))
             self.event(db,batch,'advance',{'from':stage,'to':stage+1,'unresolved_carried':result['counts']['blocked'],'check_report':result['report_ref']})
         following=self.check(batch)

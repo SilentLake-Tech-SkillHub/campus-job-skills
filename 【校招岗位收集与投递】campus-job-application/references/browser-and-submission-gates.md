@@ -1,71 +1,35 @@
-# Browser and submission gates
+# 浏览器与页面核验
 
-Read this reference before opening/filtering roles, filling, or submitting any application.
+开页、筛选、核验岗位之前读本文件。搜索端只做信息收集和核验，不填表、不上传、不提交；填写与提交由投递组件在正向评审确认后执行。
 
-## Browser selection and retained tabs
+## 浏览器选择
 
-用户明确选择搜索 MCP 的 Chrome+内置浏览器并发时，按 [search-mcp](search-mcp.md) 同时执行独立公司任务，使用统一派发和结果检查；这是已批准分支，不再重复询问同一双通道授权。未作此选择时适用下方默认顺序和降级要求。页面保护、范围和申请边界继续生效。
+- 使用 `产品管理/求职配置.md` 指定的浏览器；降级顺序为 内置浏览器 → Chrome＋computer use → Playwright 框架（内置浏览器自带的 Playwright 命名控制接口仍属第一档）。当前浏览器失败时，在原浏览器内做一次有证据的恢复尝试；仍失败则向用户说明实际失败、拟切换的浏览器以及对登录和未保存内容的影响，取得用户明确确认后才切换。确认一次切换不等于授权下一次。
+- 用户确认搜索 MCP 的双浏览器并发时，按 [搜索 MCP](search-mcp.md) 执行，同一批次不再重复询问。
+- 读 [标签分组](chrome-window-grouping.md)。每个标签保留所属公司，不把某公司的标签导航成另一家公司，不占用用户的标签或窗口；归属不清时另开新标签。
 
-- Browser priority is **in-app browser → Chrome + computer use → Playwright framework**. Start in the in-app browser. Before each downgrade, show the actual failure, proposed next tier and effect on login/unsaved work, then obtain the user's explicit confirmation for that transition. Confirmation of one transition does not authorize the next. Preserve company tabs and state while waiting; do not automatically switch or bypass a site safety refusal. The in-app browser tool's own Playwright-named control API remains the first tier; it is not use of the separate Playwright framework.
-- Read [browser tab grouping](chrome-window-grouping.md); the ten-page Chrome window rule applies only to an explicitly selected Chrome branch. Each tab keeps its company identity; never repurpose another company's tab or a user window.
-- Confirm the batch intent before opening company windows. In `准备投递` mode, keep filtered result pages and role details open for user selection and review. In `信息收集` mode, keep them open during that company's investigation; save and read back the official company campus URL plus **every verified in-scope direct role URL and JD** in the workbook, or record the exact pending blocker, before closing only that company's eligible agent-created tabs and advancing. Window closure does not turn a blocked or partially recorded company into completed coverage. This choice never authorizes résumé upload, form filling or application submission.
-- Do not close or repurpose a tab the user opened. Open a new tab when ownership is unclear.
-- Exception for reviewed non-priority role tabs: after the user has confirmed the exact retained highlighted roles and then separately confirms the closing action, close only tabs that match recorded direct role links outside that retained set. Keep the master-link page, filtered result pages, login/account pages, retained tabs, and unidentified user tabs open.
-- The user's confirmed `信息收集` batch choice authorizes closure of the investigated company's unprotected **agent-created** tabs after the dual-link saved-workbook readback (or explicit pending-blocker record), company identity check and tab count. In `准备投递` mode, require explicit company-specific closure authorization; a request to move to the next company is not that authorization.
-- Before closing a company window, treat user-selected/retained role pages, a form awaiting review, submission receipts, and login/account pages required for a next approved action as protected. Name them and obtain a separate explicit confirmation for that exact window; never close user-owned or ownership-unclear windows. Existing windows created in an earlier batch cannot be bulk-closed on an unverified ownership assumption: inventory their company, ownership, and protected tabs first, and request confirmation for those that cannot be safely classified. Preserve other companies in shared windows. Close a whole window only when all its tabs are Agent-owned, eligible and unprotected; verify the exact target tabs are gone and report their company and count.
-- Recovery and downgrade: make one evidenced recovery attempt within the current tier while protecting unsaved work. If still blocked, ask for approval of the next tier in the stated priority. After Chrome + computer use fails, ask separately before the Playwright framework. A real failure is evidence for a request, not permission to downgrade. If approval or a supported next tier is unavailable, keep the company/URL/stage handoff and report the blocker.
-- Visible retention: retain the entire confirmed company group in preparation/submission mode, including unfinished companies, accounts, forms and receipts. Before ending the turn, use the tool's documented visible-retention mechanism and read back company, URL and stage from the tab list. Where a visible deliverable and an internal handoff are distinct, retained pages must be visible deliverables; a handoff call alone is not proof of visible retention. Missing pages must be reported and recovered from original URLs, with saved content checked; reopening does not restore unsaved edits. Finishing one role or yielding for user action never authorizes cleanup of the remaining group.
+## 标签的保留与关闭
 
-## Page and source checks
+- 开公司页面前先确认本批意图。
+  - **信息收集**：该公司核查期间保留结果页和详情页；岗位链接、JD 和校招主链接写入主数据并读回后（或已写明待查缺口后），只关闭该公司由 Agent 打开、且不受保护的标签，然后进入下一家。关窗不等于该公司已完成。
+  - **准备投递**：保留结果页和详情页供用户选择；关闭某公司窗口需要用户对该公司单独授权，“开始下一家”不算授权。
+- 受保护页面：用户选中或要求保留的岗位页、待审核的表单、提交回执、下一步需要的登录/账号页。关闭前点名并取得用户对该窗口的单独确认；用户的窗口和归属不清的窗口不关闭。
+- 共享窗口里保留其他公司的页面；只有整个窗口都是 Agent 打开、可关闭且无保护页时才关整窗。关闭后核对目标标签确已关闭，汇报公司和关闭数量。
 
-- Confirm the domain or page branding belongs to the company or its named recruiting platform.
-- Confirm the visible cohort, recruitment type, location, role title, and role category whenever the site exposes them.
-- For every filtered plan view, including a broad target-family view with no user preference, retain the filtered result page as the master page. Enumerate all visible in-scope results across available pagination and open each through its visible official result card in a separate detail tab (or the site's equivalent non-destructive navigation). Verify a loaded detail page with a role title and substantive job description before calling that role opened. Retain its actual direct URL and the master result page; a search-result card or a guessed URL is not detail-page evidence.
-- If the detail page is 404, blank, expired, unavailable, or redirects to a generic page, do not count it as a verified role or fabricate its direct link or JD. Retry once from the visible official result card; if still unresolved, report the failed page and leave that role and the batch's affected scope pending. Do not silently treat the failure as zero matching roles.
-- If the in-scope result count is too large to open and inspect without causing unreasonable tab volume, do not sample or omit roles. Preserve the master page, report the count, and ask the user to narrow the role or city criteria before completing the batch.
-- Take reviewable screenshots with enough browser context to identify the company, page state, and decision point.
+## 页面与来源核验
 
-## Filling boundary
+- 域名或页面品牌属于该公司或其招聘平台。
+- 核对页面显示的届别、招聘类型、工作地点、岗位名称和岗位类别。
+- 每个筛选后的计划结果页作为主页面保留；翻完所有分页，逐个从官网结果卡片在新标签打开详情页。详情页有岗位名和实质 JD 才算已核；结果卡片或猜测的链接不算详情页证据。
+- 详情页 404、空白、过期、不可用或跳到通用页面：不算已核岗位，不编造链接或 JD；从结果卡片重试一次，仍失败则列为未核，该范围保持待查，不当作零结果。
+- 范围内结果太多、无法逐个核验时，不抽样、不省略：保留主页面，报告数量，请用户收窄范围后再完成。
+- 截图保留能识别公司、页面状态和关键节点的上下文。
 
-- Filling is authorized only after the user has selected the specific role and asked Codex to continue.
-- Use facts from the authorized résumé and other user-approved materials. Do not infer personal data from old or protected files.
-- Leave credentials, OTPs, CAPTCHA, electronic signatures, sensitive identity declarations, and person-only attestations to the user.
-- If the site auto-saves a draft or creates an application shell during filling, report that external state.
-- Before stopping for review, check all visible required fields and upload controls, but do not activate the final submission control.
+## 截图与隐私
 
-## Review gate
+- 截取能证明状态的最小区域，尽量不露出电话、邮箱、地址、证件号、生日、签名或上传文件内容。
+- 密码、验证码、Cookie、令牌和证件内容不写入主数据、Skill、截图说明或任何会进入公开仓库的文件。
 
-Provide a concise review package for each role:
+## 填写与提交
 
-- company and role title;
-- direct role URL;
-- résumé file used;
-- material answers or uploads completed;
-- unresolved or user-only fields;
-- screenshots of the completed form and final submit area.
-
-Keep the form open. Status changes follow the current MCP policy and user confirmation.
-
-## Submission gate
-
-- Require explicit user approval after the review package. Approval applies only to the named roles in that package.
-- Re-check the role title, company, résumé, and unresolved warnings immediately before each submission.
-- Submit one role, wait for its result, and verify its receipt before moving to the next.
-- On a timeout, blank page, ambiguous confirmation, or recoverable error, stop retries that could create duplicate applications. Inspect the application center or visible site state first.
-- Preserve visible receipt or application-status evidence; update the status through the current MCP confirmation flow.
-
-## Screenshots and sensitive data
-
-- Capture the minimum area that proves the state while retaining enough context to identify the site and step.
-- Avoid exposing phone numbers, email addresses, addresses, identification numbers, birth dates, signatures, or uploaded document contents when the same evidence can be captured without them.
-- Do not save passwords, cookies, OTPs, tokens, or identity-document contents in project files.
-
-## 独立偏好与执行证据
-
-Open/filter 依 [偏好契约](preference-contract.md) 仅用硬范围筛除，排序不限制覆盖。填写前逐岗展示公司、岗位、直链、BU 或未披露、城市、用工、方向、完整 JD 依据及筛选理由，持久化 pre_form_report_ref；退出/交付报告 fill/save/submit 的实际状态与证据，不以登录代替准备。Review 保留表单版本，提交继续精确目标与版本审核。
-
-每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
-
-## 公司方案交接更新
-
-执行[公司机会核对与交接](company-review-handoff.md)：新增九张跨公司明细表，保留既有地区表列与状态；全部岗位目录、三档候选、推荐、用户选择分开记录。HTML用于核对，Excel为主，JSON从Excel导出并每次同步。准备申请前须完整公司确认，内推核查前移；与本文件旧的直接填表描述冲突时，以该交接入口为准。
+不在搜索端执行。用户确认“岗位待投递”后，按 [正向评审与反向评审](company-review-handoff.md) 交给投递组件；提交前的表单审核、具体岗位授权和回执核验由投递组件负责。

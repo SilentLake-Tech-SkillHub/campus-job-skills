@@ -1,33 +1,17 @@
-# Workbook schema
+# 主表字段约定
 
-Read this reference before creating or updating role rows in the workbook named in the job-search profile (`产品管理/求职配置.md`).
+新增或更新岗位行之前读本文件。主数据是 `岗位交接/工作簿全量.json`，所有写入经 `scripts/json_excel_sync.py`；Excel 由它写出，只供人看。
 
-## Sheets
+## 工作表
 
-- Regional role sheets: one per region listed in the job-search profile (for example `中国大陆` and `香港`), each holding the source companies of that region.
-- `分类说明`: preserve the source classification guidance and add only concise notes needed to explain role-row behavior.
-- `校招主链接`: reusable company-level index of verified official campus-recruitment landing pages. It is separate from the regional role tables and must not contain role-level JD, status, or application data.
-- `校招计划`: one row per verified company–plan, plus one blank-plan coverage row for each company not yet verified. It stores cross-plan application relationships separately from within-plan limits. This sheet does not replace the company master-link index or the role table.
+- **地区岗位表**：`求职配置.md` 列出的每个地区一张（如 `中国大陆`、`香港`），存放该地区的来源公司和岗位行。不合并地区表，不建单公司表。
+- **地区附属索引表**（如某地区的公司官网清单）：保留原有列，只做公司级索引。
+- **`分类说明`**：企业分类口径、字段与标签说明；用 `set-sheet-rows` 整页覆盖。
+- **`校招主链接`**：每家公司一条当前有效的官方校招入口页，不放岗位级 JD、状态或投递数据。
+- **`校招计划`**：每家公司每个已核实的本届计划一行；尚未核实的公司保留一行空计划的覆盖行。只记录计划之间的投递关系，名额在 `投递名额`。
+- **`投递名额`**：公司投递规则的唯一位置，每家公司每个范围（`公司总量`、某计划、某 BU）一行，列为 `公司 / 范围 / 适用计划/批次 / 投递上限 / 当前投递数量 / 是否分BU可平行投递 / 是否可以滚动投递 / 规则原文 / 来源/核验日期`。只由 `set-quota-rules` 写入，按公司整体覆盖。`规则原文` 只能是官方来源文字的逐字连续摘抄（不能总结、改写或拼接多段，多条规则按范围分行），写入时须提供保存的来源原文文件（`原文出处文件`），脚本逐字核对；没有官方说法时写“公司未披露”。`来源/核验日期` 固定为 `来源：<公司>-<岗位或页面> 核验日期：YYYY-MM-DD`，公司须与本行一致，格式由脚本卡死。`投递上限` 为非负整数或 `公司未披露`；两个是否列只能填 是/否/公司未披露（没有明确的官方说法即公司未披露）；`当前投递数量` 由脚本计算。名额收口按 `公司总量` 行执行。
 
-Do not merge the regional sheets or create per-company sheets.
-
-## Campus recruitment master-link index
-
-`校招主链接` uses these columns:
-
-1. `公司`
-2. `地区`
-3. `校招主链接`
-4. `适用届别`
-5. `投递窗口`
-
-- Store one current verified official campus-recruitment entry page per company. Use it as the first navigation source for future Open/filter work.
-- A `校招主链接` is a company-level landing, directory, or current-cycle campus page; it is never a direct role page and does not replace `岗位链接` in a role row.
-- Keep the visible cohort or cycle only when the official URL/page makes it clear. If the page is current but has no cohort label, leave `适用届别` blank rather than guessing.
-- Write a fully disclosed window as `YYYY年MM月DD日-YYYY年MM月DD日可投递`. If an official source provides a refresh date but no closing date, record the date and `截止日未披露`; do not derive a date from a previous cohort, a quota rule, or a third-party listing.
-- Refresh a stale master link in place after reporting the change. Do not create a duplicate company entry or populate any role fields in this index.
-
-## Column order
+## 地区岗位表列序
 
 1. `地区`
 2. `公司`
@@ -39,89 +23,55 @@ Do not merge the regional sheets or create per-company sheets.
 8. `所属BU`
 9. `岗位链接`
 10. `投递状态`
-11. `匹配度`
-12. `匹配原因`
-13. `校招冷静期`
-14. `校招计划`
-15. `备注`
-16. `内推码`
+11. `校招计划`
+12. `备注`
+13. `内推码`
+14. `数据刷新时间`
+15. `投递截止`
 
-`校招计划` in a real role row names the verified source plan. Leave it blank when the source plan cannot be identified; do not infer it from the company. Keep a placeholder company's role-plan cell blank.
+## 行的规则
 
-`备注` records material, evidence-based role facts that do not fit the existing fields, especially an officially stated conversion internship included last in the same report under a privately confirmed conversion_last policy, cohort eligibility, minimum duration/attendance and conversion conditions. Preserve `实习` in the title and plan; label an eligible case `实习转正候选` and quote the official evidence concisely. State that conversion is an opportunity, not a guarantee. Ordinary internships without explicit official conversion wording remain out of a formal/full-time batch. For a company placeholder with no in-scope role row, keep `岗位名称`/`岗位链接` blank and use `备注` for the checked cohort, sources, date, exact result, any previous attempt, and unresolved scope. Put mergers into another company/plan, user stop decisions, application deadlines, eligibility, and internship conversion facts here; they are not `盘点状态` values. The note must distinguish a truly untouched `尚未推进` row from a partially checked one. This visible note is a pointer to `校招计划` evidence, not a role. This field does not imply user selection or application authorization.
+- 每家公司在其出现的每张地区表固定一行**公司行**（岗位名称、岗位链接留空），排在该公司最前，有没有岗位都保留；公司行状态只用 `产品管理/公司状态标签.json` 的公司标签。
+- 每个真实岗位独占一行，紧接在公司行之后插入并复制前四个公司字段；新增岗位不占用公司行；同一公司的行保持连续。
+- 同一公司块内，同名或同岗位族的行相邻；按申请时间（或实习开始时间）由近到远排列，起止未披露的排在本公司块末尾。身份仍按官方 ID 或直链，不按名称合并。
+- 重复判断以官方岗位 ID 或规范化的详情页链接为主；网站换了链接时，比对公司、岗位名、BU、JD 中的地点和岗位 ID 后再决定是否为新岗位。
+- 已投递及之后状态的行不删除；刷新改动的 JD 或链接先向用户报告差异。
 
-`内推码` is filled by the [referral-code subskill](../skills/campus-job-referral-code/SKILL.md) with the verified plan/BU/role-scoped value only on applicable role rows, formatted `<码>｜<来源平台>｜<届别/批次>｜<核实日期>｜<来源链接>`, or `未找到｜<已查来源>｜<核实日期>`. Leave it blank until checked; never copy a code from another cohort.
+## 岗位汇总文件
 
-## Campus plan inventory
+从地区表生成的岗位汇总文件同样按上述公司归组与排序；每岗位一行，按官方岗位 ID（无 ID 时按规范直链）去重，同名但 BU、城市或 ID 不同的保留，一个多城市 ID 不重复计数。默认列：序号、公司、岗位名称（英文）、岗位名称（中文）、岗位分类、实习开始时间/时段、岗位JD（英文）、岗位JD（中文全文翻译）、工作地点、岗位链接、备注。中文岗位名与中文 JD 必须是官方英文原文的完整忠实翻译：逐段覆盖全部小节，保留段落与编号结构，公司名、产品名、技术缩写、日期、数字和链接保留原文；不能用中文摘要代替全文翻译。
 
-The `校招计划` sheet begins with the user-specified columns:
+## 字段
 
-1. `公司`
-2. `计划`
-3. `投递关系`
-4. `地区`
-5. `适用届别`
-6. `计划链接`
-7. `计划内投递限制`
-8. `依据链接`
-9. `核验日期`
-10. `盘点状态`
+- `岗位名称`：官网岗位原名；不写“第N志愿”，不把多个岗位拼成一行（写入脚本拒绝）。
+- `工作地点`：照抄官方职位页明确标示的地点；未披露留空或写“未披露”，不从 BU、总部或 JD 中偶然提到的城市推断。
+- `岗位JD`：完整照录可见 JD，保留标题与分段；网站限制访问时记录可见部分并说明限制。
+- `所属BU`：网站明确的事业部、部门、团队、产品线或用人主体；没有则写“未披露”。
+- `岗位链接`：该岗位的 https 官网详情页，从官网结果卡片打开得到；不用列表页、首页、第三方网站、猜测或过期链接，也不与其他岗位共用。无法核实直链的岗位不入表，保持待查并报告。
+- `投递状态`：岗位行只用 `产品管理/投递状态标签.json` 的岗位标签，公司行只用 `产品管理/公司状态标签.json` 的公司标签；任何变化走 `propose` → 用户确认 → `confirm`。
+- `校招计划`：该岗位所属的已核实计划；无法确认来源计划时留空，不按公司推断。公司行留空。
+- `备注`：只用于“用户例外保留：<原因>”（用户明确保留一个不符合其规则的岗位），最多 150 字；其他内容一律不写。公司行留空。字段规则在 `产品管理/表格字段规则.json`，写入脚本强制执行。
+- `内推码`：由 [内推码子 Skill](../skills/campus-job-referral-code/SKILL.md) 填写，格式 `<码>｜<来源平台>｜<届别/批次>｜<核实日期>｜<来源链接>`，未找到写 `未找到｜<已查来源>｜<核实日期>`；未查时留空，不复用其他届别的码。
+- `投递截止`：岗位行必填，官网截止日期 `YYYY-MM-DD`，或“公司未披露”。
 
-- Identify a row by region, company, cohort, and plan name. Several current plans for one company occupy separate rows.
-- 状态标签、适用行类型、变更确认和写入由工作区当前 MCP 标签配置及同步脚本统一管理。Skill 不定义标签枚举、空值规则或默认状态，不自行将旧值映射为新值。 旧盘点状态只作历史来源；不得重新启用其枚举或将其当作主表当前状态。
-- Write `投递关系` against named counterpart plans, e.g. `与JDS-新星计划：可同时投递；与新锐之星：待核实`. If a company has only one verified plan, write `暂无其他已核实计划` rather than asserting no others exist. The relationship can be independent, mutually exclusive, shared-quota, conditional, or pending verification only when supported by current evidence.
-- Record plan-internal quota, one-time opportunity, cooling period or refresh in `计划内投递限制`, not as cross-plan conflict. Link the exact current source in `依据链接` and record `核验日期` as an Excel date. If one source does not support every assertion, list the specific supporting links in that cell.
-- The following coverage buckets are internal evidence checks; user-facing statuses follow the current MCP policy. The one-time initialization covers every company in the approved region/scope with either verified plan rows or a blank-plan coverage row. For the first-pass sweep, count prior research only when it covers the target graduating cohort/current recruiting cycle. Assign each company/source scope to exactly one outcome bucket: `first-pass-covered` (required current-cycle evidence is verified, including a documented mapping to an identical covered source); `first-pass-visited-but-unresolved` (a current-cycle attempt/outcome is documented but evidence/access is incomplete); `cycle/evidence-ambiguous-deferred` (an old partial/blocked row has no reliable evidence tying it to this cycle or proving an attempt); or `first-pass-unvisited` (no current-cycle attempt and no ambiguous legacy status). A visited attempt is not the same as verified coverage. Count unavailable pages and unknown plan relationships as separate issue counts that may overlap an outcome bucket. Reuse coverage across aliases/business-unit rows when the official ATS tenant, plan, filters, result pages and job IDs match, and document the mapping. Only first-pass-unvisited scopes enter the Stage 1 queue; deferred ambiguous records are listed for user decision and not reopened just to establish history. Prior-cycle research remains useful source context but does not count as current-cycle coverage; such a company still needs its first pass for the current cycle. A partial status, an old plan row, or a missing role row does not automatically trigger follow-up. At the end of Stage 1, report the four outcome buckets and exact gaps, then wait for user selection; a generic `继续` does not authorize Stage 2. In a user-directed follow-up, inspect only the selected company and exact gap.
+## 校招主链接
 
-`岗位名称` is user-approved and required to distinguish several roles at one company.
+列为 `公司 / 地区 / 校招主链接 / 适用届别 / 投递窗口`。
 
-## Row semantics
+- 每家公司一条当前有效的官方校招入口页（公司级的着陆页、目录或本届校招页），从不放岗位详情页。
+- 官方页面明确届别时才填 `适用届别`，否则留空。
+- 完整披露的窗口写 `YYYY年MM月DD日-YYYY年MM月DD日可投递`；只有刷新日期没有截止日期时写明“截止日未披露”，不从往届、名额规则或第三方推断。
+- 链接过期时报告后原行更新，不新增重复行。
 
-- Each actual role occupies exactly one row.
-- A company with no **verified in-scope role** keeps one placeholder row containing only the four company-level fields; role facts remain blank; status follows the current MCP policy. In information-collection mode, user selection is **not** required to create a row for each verified in-scope role.
-- For the first role at a company, populate the existing placeholder row.
-- For additional roles, insert an adjacent row and copy the four company-level fields.
-- Use the direct official role URL as the primary duplicate key. If the site changes the URL, compare company, role title, BU, location text inside the JD, and visible job ID before deciding whether it is new.
-- Preserve submitted rows. A refresh may update a changed JD or URL only after reporting the observed difference; never replace submission evidence with a newer listing silently.
+## 校招计划
 
-## Values
+列为 `公司 / 计划 / 投递关系 / 地区 / 适用届别 / 计划链接 / 依据链接 / 核验日期 / 盘点状态`。
 
-- `岗位JD`: copy the complete visible job description faithfully. Preserve headings and paragraph separation in one wrapped cell. Do not summarize unless the site blocks full access, in which case record the visible content and limitation.
-- `工作地点`: copy the explicit official work-location text exactly as shown on the role page. If absent, leave blank or use `未披露`; do not infer a work location from the BU, company headquarters, office network, or incidental geographic text in the JD.
-- `所属BU`: use the site's explicit business unit, department, team, product line, or employing entity. If absent, use `未披露` rather than guessing.
-- `岗位链接`: for a verified role row, use its actual direct official role-detail URL, opened from an official result card or equivalent site navigation. Do not substitute a result-list, guessed, expired or generic URL and call that role complete. If no direct detail URL can be verified, retain the official result URL as separate research evidence, mark that role/company scope pending and report the limitation; never fabricate a direct link.
-- `投递状态`: 状态标签、适用行类型、变更确认和写入由工作区当前 MCP 标签配置及同步脚本统一管理。Skill 不定义标签枚举、空值规则或默认状态，不自行将旧值映射为新值。 保存检索结果不自动赋值；任何首次赋值或状态变化均使用当前 MCP 的提议、用户确认及固定写入流程。
-- `匹配度`: integer from 0 to 100, based on the complete JD, current user-confirmed résumé, verified project portfolio, and explicit user self-assessment. Leave blank when the required candidate material is unavailable. It is a capability-fit score, not a hiring probability.
-- `匹配原因`: concise evidence-based explanation using `匹配：...；缺口：...`. Separate résumé-visible evidence from portfolio-only evidence when that difference could affect screening.
-- `校招冷静期`: verified official constraints on applications for the relevant campus-recruitment cycle, including a quota, cooling period, annual refresh date, or an immutable post-submission rule. Leave blank for company placeholders and where no official rule has been verified; blank never means unrestricted. Before filling or submitting, recheck the logged-in account's displayed remaining count. Reuse verified rules recorded in the job-search profile.
+- 一行一个公司–计划；同一公司多个当前计划分行记录。
+- `投递关系` 写明对应计划，例如 `与A计划：可同时投递；与B计划：待核实`。只核实到一个计划时写 `暂无其他已核实计划`，不断言没有其他计划。
+- 计划内名额、冷静期、刷新写进 `投递名额`（范围 = 该计划），不写在这里。
+- `依据链接` 写支持各项结论的具体官方链接，`核验日期` 写日期。覆盖分类见 [研究进度核对](research-progress.md)。
 
-Do not infer mastery from project labels or technology keywords. Follow the user's self-assessment recorded in the job-search profile when it conflicts with keyword evidence.
+## 读回
 
-## Visual priority marking
-
-- In a reviewed batch with scored real roles, apply pale-yellow fill across the full row of only the five highest `匹配度` rows; when fewer than five are scored, mark all scored rows. Use current worksheet row order only to resolve a tie.
-- Do not color company placeholders or change any non-top-five row. This is a visual cue only: it must not alter `匹配度`, `投递状态`, direct links, or existing status validation and conditional formatting.
-
-Do not add extra status values without a user-approved schema change.
-
-## Workbook safety
-
-- Before structural edits, record the source SHA-256 and make one recoverable backup.
-- Preserve all source companies and classification text. Check company counts against the expected baseline recorded in the job-search profile.
-- Use filters, freeze the header row, wrap JD cells, keep hyperlinks readable, and use a list validation for nonblank role statuses where supported.
-- On every edit, reload the latest workbook, update the smallest affected region, recalculate once, inspect key values and formula errors, render the changed sheet, export to the original workbook path, and verify the saved file.
-- Before a researched company is marked complete or its research window is closed, reopen the saved workbook and read back both the company's verified `校招主链接` row and every verified in-scope regional role row's direct `岗位链接` and JD. If no role was found, preserve the official plan/result-page and filter evidence for the zero-result conclusion. A missing direct link, unsaved row, inaccessible detail or unsearched plan keeps the affected scope pending.
-
-查询、续跑与汇报须同时核对当前生效标签、地区备注及日期/访问证据，按[研究进度强制核对](research-progress.md)校验。仅列盘点状态统计不满足交付要求。
-
-## 独立偏好与执行证据
-
-按 [偏好证据契约](preference-contract.md) 保持原列序、枚举、公式、验证和公司块。身份优先官方 ID/规范直链；同名不同 ID 不误合并，多城市同一 ID 不增行。三轴、用工/方向、版本、筛选理由和执行证据放现有备注及私有流水，不擅加列。匹配分只衡量能力，Top5 仅高亮容量；转正实习同报告末尾，已投/回执/明确选岗不得因偏好更新丢失。
-
-每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
-
-## 公司方案交接更新
-
-执行[公司机会核对与交接](company-review-handoff.md)：新增九张跨公司明细表，保留既有地区表列与状态；全部岗位目录、三档候选、推荐、用户选择分开记录。HTML用于核对，Excel为主，JSON从Excel导出并每次同步。准备申请前须完整公司确认，内推核查前移；与本文件旧的直接填表描述冲突时，以该交接入口为准。
-
-常规字段更新使用[数据建设与固定脚本](storage-workflow.md)的统一键控写入、保存读回与全量 JSON 刷新。志愿和研究检查在共享表保留，原地区表不新增零散列。
+一家公司的研究标为完成或关闭窗口前，用 `json_excel_sync.py query --company <公司>` 读回该公司的校招主链接和每个岗位行的直链与 JD。没有找到岗位时，保留已查计划和结果页的依据。缺直链、未保存的行、打不开的详情页或未查的计划，都让对应范围保持待查。

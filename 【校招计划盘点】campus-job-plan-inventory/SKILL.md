@@ -1,58 +1,35 @@
 ---
 name: campus-job-plan-inventory
+description: Identify and inventory a company's applicable campus-recruitment plans once during the first-pass search, recording plans, plan relationships and application rules in the master JSON; after the first pass, investigate plan gaps only when the user selects them.
 metadata:
-  version: "1.3.1"
-description: Identify and inventory applicable campus-recruitment plans once per company during the first-pass sweep; after that sweep, investigate plan-relationship gaps only when the user selects them.
+  version: "2.0.0"
 ---
 
-# 校招计划初始化与刷新
+# 校招计划盘点
 
-Use only in a job-search workspace with a job-search profile (`产品管理/求职配置.md`), before `campus-job-application` opens or filters a company's roles. Read the workbook schema in `../【校招岗位收集与投递】campus-job-application/references/workbook-schema.md` before editing.
+在 `campus-job-application` 打开或筛选某公司岗位之前使用。先读 [主表字段约定](../campus-job-application/references/workbook-schema.md)。所有写入经 `json_excel_sync.py`：计划写“校招计划”表（`upsert`），名额与投递规则写“投递名额”表（`set-quota-rules`，按公司整体覆盖），官方入口写“校招主链接”。
 
-## 转正实习与覆盖证据
+## 第一轮：每家公司盘点一次
 
-读取 [偏好与证据契约](../【校招岗位收集与投递】campus-job-application/references/preference-contract.md)。按私有配置处理转正实习；conversion_last 在同一汇报排末尾，有正式岗也展示，不需要先完成全部正式覆盖。正式覆盖不足仍须记录缺口，不宣称公司无正式岗。记录 formal_coverage、formal_coverage_refs、suitable_formal_found 和 no_suitable_formal_ref；不把单计划零结果当公司结论，偏好变更不重启首轮。
+1. 用 `json_excel_sync.py query --company <公司>` 读该公司已有的校招主链接、校招计划、投递名额和岗位行。已有本届核查记录（即使有缺口）就不重开，缺口留给补查。
+2. 只对“未访问”的公司（见 [研究进度核对](../campus-job-application/references/research-progress.md)）打开当前官方校招入口。一家公司可能有多个计划：正式校招、提前批、BU 专项、管培/产培、实习等。只记录当前官方来源支持的计划；往届计划只作线索，不当作本届。
+3. 每个已核实的计划写一行“校招计划”，填计划链接、依据链接、核验日期和盘点状态。没有核实到本届计划时保留空计划的覆盖行，并写明已查来源。
+4. 官方直接披露的计划间关系写进 `投递关系`；未披露的写 `待核实` 并列入补查清单，不为逐对核实计划关系而拖延第一轮队列。
+5. 主动查清投递规则：公司总量、各计划或 BU 的上限、能否同时进行多个流程、能否分 BU 平行投递、终止后能否续投、冷静期与刷新、投递后能否修改。写入“投递名额”表：规则原文逐字摘抄官方原文，同时把保存的来源原文文件作为 `原文出处文件` 交给脚本核对；来源写成 `来源：<公司>-<岗位或页面> 核验日期：YYYY-MM-DD`。查不到的取值写“公司未披露”。不能用一个公司总上限代替各范围的规则。
+6. 特殊计划（如管培/产培）先向用户展示培养路径、要求和名额影响，再问是否考虑，并对照 `求职目标.json` 的特殊通道规则；不能只抽象地问“要不要管培”。
 
-## One-time project initialization
+## 补查
 
-1. Read the company list from both regional sheets. Create one coverage entry for every distinct region–company identity in `校招计划` before claiming initialization coverage. A blank `计划` with no plan/role research for the target cohort/current cycle in the Plan or research log is a first-pass queue item, not a discovered plan. Prior-cycle research and a saved company master URL alone do not count as current-cycle plan/role research. A `部分盘点` or `访问受阻` status whose cycle or evidence is unclear is conservatively treated as already visited and deferred for user-selected follow-up; do not reopen it just to resolve its status. If the workbook status conflicts with dated current-cycle Plan/research evidence, use the evidence and correct the status during a user-authorized update.
-2. Check the current official campus entry only for companies classified as first-pass-unvisited for the target graduating cohort/current recruiting cycle. Prior-cycle research is a source clue, not current-cycle coverage. A company may have multiple plans, business-unit programs, graduate tracks, and dual-eligible internship programs. Record only what the current source supports; do not treat a historical program as current. Existing current-cycle plan or role research counts as prior coverage even when it is partial; preserve it for the follow-up list.
-3. For a first-pass-unvisited company, replace its blank-plan coverage entry with one row per verified plan. Record plan facts, company relationships, user decisions, evidence gaps and sources in existing fields. Status changes use the current MCP policy and confirmation path. A blank `计划` remains the coverage row if no current plan is verified.
+第一轮结束后，汇报四类覆盖数量和具体缺口，等用户点名公司和缺口。只刷新缺失、过期、变化或被点名的证据；复用已查页面、筛选、结果和岗位，不重复已完成的搜索。只有该公司所有相关计划和范围内结果都查完，才能下“没有匹配岗位”的结论，并列出仍未打开或未查的页面与计划。
 
-状态标签、适用行类型、变更确认和写入由工作区当前 MCP 标签配置及同步脚本统一管理。Skill 不定义标签枚举、空值规则或默认状态，不自行将旧值映射为新值。 招聘计划、访问结果和缺口保留来源、日期与说明，不再通过旧盘点枚举维护第二套状态。
+## 证据与安全
 
-4. During the first-pass sweep, record any plan relationship that is directly disclosed by the current source. If it is not disclosed, mark the relationship `待核实` and add it to the follow-up list; do not delay the first-pass company queue to investigate every plan pair. After the sweep, research only the plan relationships the user selects. Keep within-plan application limits in `计划内投递限制`, separate from cross-plan relationships.
-5. Preserve source URL and date. The following four audit buckets are internal coverage measures, not user-facing status labels. Report mutually exclusive counts for first-pass-covered, first-pass-visited-but-unresolved (a documented current-cycle attempt whose evidence or access remains incomplete), cycle/evidence-ambiguous-deferred (no reliable evidence that the old partial/blocked record belongs to this cycle), and first-pass-unvisited. Report unavailable pages and relationship-unknown items as separate cross-cutting issue counts, not additional company buckets. A queue of unvisited companies is not a completed research pass. Resume the first-pass sweep in batches without reopening companies already attempted, including those with zero results, no current plan found, inaccessible pages, or partial coverage. Keep unresolved relationships in a follow-up list; revisit them only when the user selects the exact company and gap after the first pass.
+- 以官方页面、官方接口和雇主公告为准。高校转发的雇主公告可作佐证，记录准确链接和原文。第三方汇总只是线索，不能单独证明名额或计划冲突。
+- 不因有不同的申请按钮或计划名就推断计划独立，也不因共用登录或账号就推断冲突。
+- 名额和刷新等时效性规则，在投递组件填写或提交前由其重新核对登录账号显示的剩余机会。
 
-## Company lookup and refresh
+## 浏览器
 
-Use this Skill in two ordered stages. **Stage 1 first-pass sweep:** for each in-scope region–company identity with no prior scoped research for the target graduating cohort/current recruiting cycle, reuse the saved `校招主链接` and existing workbook/Plan/research evidence. Research from an older cohort is source context but not current-cycle coverage. Once any actual screen for this cycle is documented, that company/scope has a prior visit for Stage 1 even if the earlier Query was narrower; a later Query change creates a possible follow-up gap and does not restart the sweep. Match coverage by the official ATS tenant, plan ID, filters, result pages and role IDs as well as the displayed company name. If an alias or business-unit row is already covered by the same source scope, record the mapping and reuse its evidence without reopening the portal. If it has a distinct applicable plan/source scope, screen only that uncovered scope. Record every newly verified in-scope role through `campus-job-application`, along with exact unresolved pages and relationships. A documented current-cycle attempt is `first-pass-visited` even when no matching role was found, no current plan appeared, access failed, coverage was partial, or a relationship is unknown; unresolved evidence remains `first-pass-visited-but-unresolved` until complete. If an existing `部分盘点` or `访问受阻` status has unclear cycle/evidence, classify it separately as `cycle/evidence-ambiguous-deferred`; it is neither verified coverage nor a verified current-cycle visit, and do not reopen it to reconstruct history. Do not reopen a visited or deferred scope during Stage 1 because an item remains incomplete or the regional role cells are blank. **Stage 2 targeted follow-up:** after Stage 1, report covered, visited-but-unresolved, ambiguous-deferred and still-unvisited counts plus the exact gaps, then wait for the user to select the exact companies/gaps. A generic `继续` does not authorize Stage 2. Reuse existing pages, filters, results and roles; refresh only evidence that is missing, stale, changed, or specifically selected. Aggregate every `校招计划` row by region–company and source scope before queueing: one documented visit in any row excludes that already checked scope even if another row retains a legacy label and the regional role cells are blank. A blank-plan row with no prior company/plan research for the current cycle is an unvisited queue item; a populated current-cycle plan record or prior research outcome, including `部分盘点`, is not permission to repeat the company pass. A company master URL alone does not prove a plan pass. `校招计划` rows alone do not prove role coverage, but incomplete role coverage also does not reorder the first-pass queue. Only conclude “no matching role found” after all relevant accessible plans and in-scope results for that company have been checked; name every page or plan that remained inaccessible or unsearched.
+使用父 Skill 的浏览器规则和 [标签分组](../campus-job-application/references/chrome-window-grouping.md)。每个标签标明所属公司，不占用其他公司或用户的标签与窗口。完成后按父 Skill 的读回后关窗规则，只处理当前公司的标签。盘点不授权打开申请表、上传、填写或提交。
 
-### Internship-to-full-time conversion candidates
-
-- When the active Query selects conversion_last, and the official campus entry or a relevant target-family result surfaces internships, flag only the relevant target-family internships for detail-level conversion checks; do not expand to unrelated internship families.
-- Inspect the official JD for explicit conversion/retention wording (`实习转正`, `留用`, `转正机会`), target cohort, minimum duration/attendance and performance or other conditions. Hand off a candidate only when the target-family JD is in-scope and the official page explicitly states a conversion opportunity. The role remains an internship, is separately labeled `实习转正候选` in the role-table `备注`, and is never counted as a formal/full-time role or guaranteed conversion.
-- Ordinary internships without explicit conversion evidence remain out of scope. Ambiguous or inaccessible wording is recorded as unresolved/pending, not inferred. Track internship plan identity, cross-plan application relationship and limits separately; unknown remains unknown.
-
-Use the parent Skill's default in-app browser and [browser tab grouping](../【校招岗位收集与投递】campus-job-application/references/chrome-window-grouping.md). Only an explicitly chosen Chrome branch uses at most 10 webpage tabs in an Agent-owned window and a new window for page 11. Label every tab by company and never repurpose another company's tab or a user window. Keep useful pages while active. At completion, apply the parent's **Close a completed company window** gate to the current company's tabs only; preserve shared-window neighbours, protected and user-owned pages. Preparation/submission pages remain visible until separately authorized for closure. Inventory does not authorize application forms, uploads, filling or submission.
-
-## Evidence and safety
-
-- Prefer official pages, official APIs and employer announcements. A university-hosted employer announcement may corroborate a relationship, but record its exact URL and wording. Third-party summaries are leads, not sole proof of a quota or plan conflict.
-- Do not infer independence from separate apply buttons or separate plan names. Do not infer conflict from a shared login or one account.
-- Recheck time-sensitive rules and the logged-in account's remaining opportunities immediately before filling or submitting under the main Skill.
-- Use the Spreadsheets Skill for every workbook edit, with a recoverable backup before structural changes and saved-file/visual validation afterward.
-
-查询、续跑和汇报前必须按[研究进度强制核对](../【校招岗位收集与投递】campus-job-application/references/research-progress.md)读取当前工作簿状态、备注和有效流水，运行覆盖记录校验。历史“首轮已查”状态/备注是访问证据，不能被旧标签枚举忽略。
-
-## 完整计划、全岗位目录与投递规则
-
-每家公司读取[公司机会核对与交接](../【校招岗位收集与投递】campus-job-application/references/company-review-handoff.md)，统计已发现适用计划数及覆盖缺口，遍历计划完整岗位名称目录，再筛三档候选。主动核实公司/计划/轮次/BU/跨计划共享/同时流程数、冷冻期、撤回及换岗后果；未知逐项留已查来源，不能以单个公司总上限替代矩阵。无 BU 划分时仍查公司总上限。特殊计划先展示要求再由用户决定是否考虑。
-
-首轮可将查不到的规则留明确缺口并推进其他公司；进入该公司投递前必须在 HTML 中明示并取得用户对当前方案的完整确认，不能将“留待补查”隐藏到投递端。规则实际冲突、未确认选择或不同步版本不可交接。内推码核查同样由搜索端在 HTML 交付前完成。
-
-## 数据建设闭环
-
-执行[数据建设与固定脚本](../【校招岗位收集与投递】campus-job-application/references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、九张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。
-
-用户明确选择搜索 MCP 双浏览器并发时，继承搜索主 Skill 的 search-mcp 引用，两个浏览器处理不同独立任务；用户公司／BU内志愿顺序按公司交接契约单独保存，不替代官网志愿机制。
+用户选择双浏览器并发时，按父 Skill 的 [搜索 MCP](../campus-job-application/references/search-mcp.md) 执行，两个浏览器处理不同公司。

@@ -5,12 +5,6 @@ import json
 import re
 from pathlib import Path, PurePosixPath
 
-# Resolve inside the complete installed parent package, independent of cwd.
-import importlib.util
-_spec = importlib.util.spec_from_file_location("preference_contract", Path(__file__).resolve().parents[3] / "scripts/preference_contract.py")
-_contract = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_contract)
-
 WORKFLOW = 'search'
 STAGES = {"discovered", "verified", "preparing", "prepared", "reviewed", "submit_clicked", "submitted", "uncertain"}
 PREPARED = {"prepared", "reviewed", "submit_clicked", "submitted", "uncertain"}
@@ -176,12 +170,6 @@ def validate(data):
                 errors.append("submitted role needs official receipt")
             if stage != "submitted" and text(role.get("tracker_status")) and role.get("tracker_status") in {"submitted", "已提交"}:
                 errors.append("tracker claims submitted without verified stage")
-    errors.extend(_contract.validate_snapshot(data.get("preferences"), roles, assignments, data.get("prior_roles"), batch_id=data.get("batch_id")))
-    prefs = data.get("preferences")
-    preference_version = prefs.get("version") if isinstance(prefs, dict) else None
-    for assignment in assignments:
-        if isinstance(assignment, dict) and (assignment.get("preference_version") != preference_version or not preference_version):
-            errors.append("stale assignment preference_version")
     deltas = data.get("deltas", [])
     if not isinstance(deltas, list):
         errors.append("deltas must be a list")
@@ -193,8 +181,6 @@ def validate(data):
         for field in ("batch_id", "query_version", "assignment_version", "source_hash"):
             if delta.get(field) != data.get(field):
                 errors.append("stale or foreign delta " + field)
-        if delta.get("preference_version") != preference_version or not preference_version:
-            errors.append("stale delta preference_version")
         assignment = ids.get(delta.get("assignment_id")) if text(delta.get("assignment_id")) else None
         if assignment is None or delta.get("owner") != assignment.get("owner"):
             errors.append("delta has unknown assignment or wrong owner")
@@ -203,10 +189,6 @@ def validate(data):
                 for role in delta["roles"]:
                     if isinstance(role, dict):
                         errors.extend(search_only_errors(role, data.get("prior_roles")))
-            delta_keys = {r.get("role_key") for r in delta["roles"] if isinstance(r, dict) and text(r.get("role_key"))} if isinstance(delta["roles"], list) else set()
-            prior_snapshot = data.get("prior_roles")
-            delta_prior = [r for r in prior_snapshot if isinstance(r, dict) and text(r.get("role_key")) and r["role_key"] in delta_keys] if isinstance(prior_snapshot, list) else []
-            errors.extend(_contract.validate_snapshot(data.get("preferences"), delta["roles"], assignments, delta_prior, batch_id=data.get("batch_id")))
         if delta.get("merge_status") == "merged" and not text(delta.get("tracker_readback_ref")):
             errors.append("merged delta needs tracker readback")
     return errors

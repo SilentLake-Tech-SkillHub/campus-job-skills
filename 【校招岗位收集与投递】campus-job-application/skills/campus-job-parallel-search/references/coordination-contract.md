@@ -1,11 +1,11 @@
-# Private search coordination record
+# Search coordination record
 
-Use workspace-owned records, not this public package, for actual batch values. The allocation validator accepts this manifest contract:
+Keep actual batch values out of this public package: the manifest and deltas are process files in a temporary directory outside the workspace, deleted once results are written to the master JSON. The allocation validator accepts this manifest contract:
 
 | Field | Meaning |
 |---|---|
 | workflow | `search` |
-| batch_id / query_version | Stable private batch and confirmed scope version |
+| batch_id / query_version | Stable batch ID and confirmed scope version |
 | mode / mode_approval_ref | `single` or `parallel`, with the user's explicit choice evidence |
 | execution_channel | `platform` or `manual_handoff`; channel choice is not proof of launch |
 | participants / coordinator | Distinct participant ID strings; coordinator belongs to the list |
@@ -18,22 +18,14 @@ Each assignment contains `assignment_id`, `company_key` (includes region/cohort 
 
 Each delta carries the manifest's `batch_id`, `query_version`, `assignment_version`, `assignment_id`, `owner`, source Hash and checked time. Reject stale or foreign-version deltas until reconciled; do not silently update their version numbers. Preserve official company entry, applicable plans/relationships, current-cycle preflight, page/filter coverage, outcome, unresolved scope and `application_actions: none`. Each role carries stable identity, direct official URL, title, location and full JD (`jd_full_text` plus source capture reference). An optional concise summary cannot replace full JD. A list entry marked full text still requires semantic comparison with the source.
 
-Merge evidence records delta validation, current workbook Hash, backup reference, affected IDs, saved Hash, company/role link and JD readback. Delta receipt, accepted evidence and workbook readback are different stages; retain failures and unmerged results. Use only the workspace's existing workbook status vocabulary. Allocation validation grants no browsing authority, checks no external source and creates no cross-process lock. Operational exclusivity requires all participants to stop when their assignment version is superseded.
+Merge evidence records delta validation, affected IDs and the company/role link and JD readback from the master JSON. Delta receipt, accepted evidence and master-JSON readback are different stages; retain failures and unmerged results until resolved. Statuses use only the workspace label configuration and the propose → confirm flow. Allocation validation grants no browsing authority, checks no external source and creates no cross-process lock. Operational exclusivity requires all participants to stop when their assignment version is superseded.
 
 ## Allocation decision evidence
 
-Keep a private readable proposal alongside the manifest: the user's explicit requirements or ideas, Query/progress references, chosen grouping and count rationale, estimated workload and uncertainty, participant/worker/coordinator counts, actual concurrent capacity, wave/handoff arrangement where needed, configurable numeric or nonnumeric targets and stopping conditions, and user confirmation reference. These decision records precede dispatch. The snapshot validator does not judge allocation quality, confirm a proposal, optimize participant counts or enforce platform capacity. Reuse an unchanged confirmed proposal; version material changes and preserve their effective time and approval.
+Keep a readable proposal alongside the manifest: the user's explicit requirements or ideas, Query/progress references, chosen grouping and count rationale, estimated workload and uncertainty, participant/worker/coordinator counts, actual concurrent capacity, wave/handoff arrangement where needed, configurable numeric or nonnumeric targets and stopping conditions, and user confirmation reference. These decision records precede dispatch. The snapshot validator does not judge allocation quality, confirm a proposal, optimize participant counts or enforce platform capacity. Reuse an unchanged confirmed proposal; version material changes and preserve their effective time and approval.
 
-Delta acceptance and user reports also require the [progress contract](../../../references/research-progress.md): result status, current-cycle attempt evidence, coverage bucket, exact gaps and merge/readback state are independent required fields. A legacy delta lacking them is received evidence pending adaptation and review, not an accepted completed delivery.
+Delta acceptance and user reports also follow the [progress contract](../../../references/research-progress.md): current-cycle attempt evidence, coverage class, exact gaps and merge/readback state are independent facts.
 
-## 独立偏好与执行证据
+## 搜索端只读
 
-manifest 顶层 preferences、prior_roles；assignment/role/delta 必填 preference_version 与当前确认版本一致。roles 按 [偏好契约](../../../references/preference-contract.md) 携带所有逐岗字段及 pre_form_report_ref、execution；仅搜索的 fill/save/submit 为 not_started。公司覆盖字段放 assignment（仅无正式岗结论须充分覆盖）；旧版本拒收，已投/选岗保护，用户指定复查范围外不重查。
-
-## 搜索中的只读历史保留
-
-本批新发现岗位保持 discovered/verified（或未填写 stage）及 execution 三项 not_started。保留既有已投岗位时使用 historical_readonly:true；原 stage/receipt_ref/execution/材料与审核确认身份不变，prior_roles 保存其完整执行快照以逐字段比对，另用 current_batch_execution 的 fill/save/submit 全 {status:not_started} 明确本批未操作。顶层和 delta 都校验此例外。没有完整历史快照的旧记录先保留原件并适配/人工核验，不能重置原提交证据、冒称历史或以历史标记授权新表单动作。
-
-每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
-
-公司方案增量还必须满足 [HTML 与 Excel/JSON 交接](../../../references/company-review-handoff.md)，只有协调者维护共享明细表和导出；确认原话与已展示版本随交接保留。
+搜索增量里的岗位只处于发现/核实阶段（`stage` 为空、`discovered` 或 `verified`），`execution` 的 fill/save/submit 全部为 `{"status": "not_started"}`。已投递的岗位不在搜索中改动。

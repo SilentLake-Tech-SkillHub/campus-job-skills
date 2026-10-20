@@ -1,35 +1,28 @@
-# Job-search profile template
+# 求职配置模板
 
-Copy this file to `<workspace>/产品管理/求职配置.md` and fill in your own values. The `campus-job-*` Skills read it at the start of every batch; keep personal and project-specific values here, never in the Skills.
+复制到 `<工作区>/产品管理/求职配置.md` 并填入自己的取值。`campus-job-*` Skill 每批开始时读取它；个人和项目取值只放在这里，不写进 Skill。求职目标与选岗规则另放 `产品管理/求职目标.json`，本文件不重复。只保留当前一版，更新即覆盖。
 
 ## 工作区
 
-- 工作区根：本文件所在项目的根目录。
-- 求职账本：`<workbook>.xlsx`
-- 地区岗位表：`<region sheet A>`（说明）、`<region sheet B>`（说明）
-- 公司池基线：各地区公司数（用于核对来源公司是否完整）
-- 目标届别：`<graduating class>`
-- 默认目标岗位族：`<role families>`（每批仍由 `campus-job-preference-intake` 确认）
+- 主数据：`岗位交接/工作簿全量.json`，只经 `json_excel_sync.py` 写入。
+- 工作簿：`<工作簿>.xlsx`，由 `json_excel_sync.py write` 从主数据写出，只供人看。
+- 地区岗位表：`<地区表 A>`、`<地区表 B>`……
+- 公司池基线：各地区公司数（核对来源公司是否完整）。
+- 目标届别：`<届别>`。
+- 搜索顺序：例如“按主表中‘待搜索’公司的当前行序推进”。
 
-## 当前简历
+## 个人资料
 
-- 已验收：`<path to accepted résumé files>`
-- 任何投递前向用户确认当前版本。
+- 投递组件读取的个人资料文件：`<路径>`。
 
-## 能力自评（匹配分析依据）
+## 浏览器
 
-- `<your own self-assessment, e.g. areas where keyword evidence overstates your skill>`
+- 默认使用的浏览器，以及是否保留已有页面。
 
-## 已核实的投递规则
+## 组件
 
-- `<company>`：`YYYY-MM-DD至YYYY-MM-DD：N次；…`（来源）
+- 搜索组件、投递组件的位置；组件维护开关的位置。
 
-## 活动 Plan
+## 隐私
 
-- `<path to active plans>`
-
-## 独立偏好与执行证据
-
-硬范围与偏好分开记录：复制 [偏好空模板](preference-template.md) 到私有配置，保存三个轴原话/关系、版本/生效时间/确认依据/替代版本及指定复查范围。公共模板无个人默认值。
-
-每批先向用户要默认岗位次序，保存同批确认，不沿用上一批。每家公司开始申请操作前，先用同一逐岗包展示公司/岗位/BU或未披露/办公地，确认相对默认次序有无变化；company_order_confirmation_ref 和 pre_form_report_ref 对应同一包。交接复用这份记录，最终具体目标和当前表单版本继续审核，不另建三套脱节清单。
+- 个人资料、Cookie、登录状态可以保存在本地工作区；不得进入公开仓库和公开 Skill。

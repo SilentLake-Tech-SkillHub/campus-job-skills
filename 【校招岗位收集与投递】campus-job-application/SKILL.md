@@ -1,174 +1,63 @@
 ---
 name: campus-job-application
-description: Use for every campus-job company sweep or application in this project, including information-only collection. During the first-pass sweep, process only companies with no prior coverage in the approved scope, in workbook order; after the sweep, revisit partial coverage only for user-selected gaps. Verify official plans and in-scope roles, save and read back company and direct role evidence in Excel, assess fit when supported, and fill or submit only with separate approval.
+description: Use for every campus-job company search in this project — work through the master JSON's 待搜索 queue (or companies the user names), verify official plans and in-scope roles, write results only through the fixed script, get user confirmation for every status change, and hand confirmed roles to the application component through forward review. It never fills or submits applications.
 metadata:
-  version: "1.8.2"
+  version: "2.0.0"
 ---
 
-# 校招职位刷新与投递协作
+# 校招岗位搜索与主表维护
 
-Use this Skill only inside a job-search workspace that has the project's job-search profile (`产品管理/求职配置.md`). Read that profile first: it names the workbook, regional sheets, target graduating class, default role families, current résumé files, verified application rules and active Plans. If it is missing, ask the user for these values and create it before any browsing or workbook work. Personal and project-specific values belong in the profile, never in this Skill.
+## 开工前必读
 
-## 公司完整方案与用户确认（必读）
+- `产品管理/求职配置.md`：运行配置（主数据位置、地区表、目标届别、公司池基线、搜索顺序、浏览器）。缺失时先问用户并按 [模板](references/profile-template.md) 建立。
+- `产品管理/求职目标.json`：用户求职目标与选岗规则的**唯一来源**（岗位顺位、排除红线、城市、用工类型、特殊通道、决策红线、在用简历）。每次会话开始按文件里的“每次会话开始”向用户复述并确认方向和岗位顺位；用户纠正时直接改写该文件对应条目，不另记日志。
+- [数据建设与固定流程](references/storage-workflow.md)：每类信息的唯一存放位置和写入命令。
+- [主表字段约定](references/workbook-schema.md)。
 
-每轮搜索、续跑、交付和转投递先读取[公司机会核对与交接](references/company-review-handoff.md)。搜索端负责全部适用计划、计划内完整岗位名称目录、三档候选及完整 JD、最终推荐、轮次/公司/BU/共享名额与冷冻期、内推码查证。用户要求最终HTML先核对、再Python落账时，遵守唯一HTML分支：用户确认后固定Python写Excel、读回并同步完整与批次JSON，保留已确认HTML，不重复核对。同版及绑定要求见存储契约。其他模板流程仍从Excel导出核对视图。在对话中主动确认最终方案，收到明确确认后同轮完成固定Python写入、读回和JSON同步再结束；不另设“请再授权写入”的轮次。每次刷新两份文件一起更新；未确认、不同步或不在最终选择中的岗位不可进入表单。
+个人取值只放在工作区私有文件里，不写进本 Skill。
 
-这一交接要求适用于下方所有模式；旧 Record/fill、Submit 只作为转交入口，不在搜索 Skill 内执行申请。收集范围与申请资格分别判断，用户的软偏好不裁剪完整岗位名称目录；全部目录不等于全部可投。
+## 数据规则（Hook 强制）
 
-用户已确认双浏览器并发搜索时，先读取[搜索 MCP 与双通道](references/search-mcp.md)，默认每通道并发十家公司、合计最多二十家公司，使用持久任务队列同时派发 Chrome 和内置浏览器的不同公司任务。并发单位是公司，同公司所有计划、岗位及详情页归属同一公司租约；页面数量另按浏览器规则管理，不占新公司名额。用户可明确调整本批并发设置，收回实际证据并执行逐轮检查。此分支替代下方的默认浏览器降级顺序；一个通道失败不停止另一个独立任务，也不自动创建多个 AI。未完成、未核及租约过期均单独记录。按信息收集、核验整理、结构化、筛选推荐、用户核对推进，每轮检查数量、关系、重复、冲突与证据。用户规定全表核验后统一写入时遵守该时机，期间只存私有证据和草稿。
+- 主数据是 `岗位交接/工作簿全量.json`。AI 只读 JSON，不读不改任何 `.xlsx`；Excel 只能由 `scripts/json_excel_sync.py write` 写出并逐格读回。
+- 记录唯一、覆盖更新：每类信息只有一个存放位置、只保留最新一版。禁止追加旧结论、另存副本/历史/备份、按批次另起同类文件；搜索过程文件放工作区以外的临时目录，结论写回后即删除。回滚只靠 git。
+- 投递状态只能用标签组文件里的标签（一组一个文件）：岗位行用 `产品管理/投递状态标签.json`，公司行用 `产品管理/公司状态标签.json`；每行一个、不得为空，写入前由脚本统一检查。每家公司在每张地区表固定一行公司行，有没有岗位都保留。任何状态变化（含首次赋值）先 `propose`，把“当前状态是X，更新状态是Y”原样给用户看，用户明确确认后 `confirm`（附用户原话）。`upsert` 只改非状态字段。
+- 名额收口：用户的选择占满某公司“投递名额”表里“公司总量”的上限后，同公司剩余“岗位待筛选”在同一次确认中改为“岗位不符合用户要求”。用户选满之前，任何 Agent 不得因名额剔除岗位。
+- 对话结束前若 JSON 有未写入 Excel 的改动，展示逐格差异并问用户“现在写入 Excel，还是下一轮再写入”；现在写入 → `write`，下一轮 → `defer`（附原话）。
 
-同一 MCP 还提供[数据读写与用户核对接口](references/recruiting-data-mcp.md)：快速展开已有 Excel/JSON、保存结构化输入 JSON、固定脚本写入及读回 Excel、同步整本及批次 JSON、生成固定格式 HTML、处理用户调整和明确确认。初始化只读展开与建立明细表是不同动作；用户指定统一写入时，前期仅展开与存草稿。每次写入绑定预期工作簿及草稿 Hash，调整后重新生成核对页；接口成功不等于事实查齐或用户确认。
+## 搜索队列
 
-整家公司七项研究核验全部完成后，在整理公司方案与主动确认逐岗投递意向的节点，公司HTML开头使用 `scripts/company_summary.py` 生成固定公司汇报：招聘计划范围、符合岗位方向及硬范围的岗位数、管培／产品培训生计划数与名称、明确转正实习数；核实没有显示0，未完成显示待核。不得在流程01或筛选阶段提前展示该公司汇报；未完成公司核验时仅交付阶段核对。统计口径与节点门禁见公司交接契约。
+- **第一轮**：按主表行序处理状态为“待搜索”的公司，或用户本批点名的公司；按 `求职目标.json` 的“集团公司规则”，集团已投递过的旗下公司不再单独搜索，“不再搜索的公司”直接跳过。已经搜过的公司（有岗位行、标为“公司无合适岗位”、或“校招计划”表有本届核查记录）不重开，即使有缺口。
+- **补查**：第一轮之后，只处理用户点名的公司和具体缺口。一句笼统的“继续”只推进第一轮，不授权补查。
+- 每个新批次开始前运行 [campus-job-preference-intake](../campus-job-preference-intake/SKILL.md)，确认本批公司范围、本批意图（信息收集 / 准备投递）、执行方式（一个 AI / 多个 AI）。求职目标里已有的长期规则不重复问。
+- 用户确认多个 AI 共同搜索时，加载 [campus-job-parallel-search](skills/campus-job-parallel-search/SKILL.md)；用户确认双浏览器并发时读 [搜索 MCP](references/search-mcp.md)。
 
-所有公司均须由用户确认投递岗位志愿顺序：不分 BU 按公司成组；分 BU 各 BU 独立成组；分组机制未知明确待核。记录在独立 `user_priorities`／“用户志愿”表，不能用官网 preferences、Agent 推荐或 roles.order 代替。官网平行或无志愿机制仍保留用户自身顺序，已选岗位未经确认不可交接。
+## 每家公司的固定步骤
 
-## Execution-mode Query
+1. **对照已有数据**：用 `json_excel_sync.py query --company <公司>` 读该公司的岗位行、校招主链接、校招计划和投递名额，只查缺的范围，不重复已查页面。
+2. **计划盘点**：运行 [campus-job-plan-inventory](../campus-job-plan-inventory/SKILL.md)，列出本届适用计划及计划间关系。
+3. **筛选**：按求职目标的硬范围在官网筛选（用工类型、城市、岗位方向）；排序偏好只用于排列，不缩小搜索范围。标题和分类只用来发现候选，是否纳入按完整 JD 的实际职责判断：标题写“产品经理”但职责是运营/支持的不纳入，标题不含“产品”但承担产品职责的要纳入详核。零结果要覆盖同义标题和相关分类。
+4. **详情核验**：每个范围内岗位从官网结果卡片打开详情页，核对岗位名、完整 JD、届别或应届要求、工作地点。404、空白、过期或跳到首页的不算已核岗位；不按列表 ID 拼链接，不用第三方招聘网站代替官网。重试一次仍失败的列为未核。
+5. **任职资格**：按 [任职资格核对](references/eligibility-check.md) 分别判断职责是否在范围内、个人是否满足条件。
+6. **写入主数据**：
+   - 每个已核岗位用 `upsert` 写一行：岗位名称只写官网原名，岗位链接是该岗位的 https 官网详情页，填工作地点、完整 JD、所属BU（无则“未披露”）、校招计划、投递截止（日期或“公司未披露”）。新行状态为空，随后 `propose` 为“岗位待筛选”，用户确认后 `confirm`。
+   - 公司行：搜完有岗位的 `propose`“已有岗位”；没有符合要求岗位的 `propose`“公司无合适岗位”；用户确认后 `confirm`。新增岗位不占用公司行；新公司由 `upsert` 自动补公司行（状态为空，同样须确认）。
+   - 官方校招入口写“校招主链接”，计划写“校招计划”，公司投递规则用 `set-quota-rules` 整家覆盖写“投递名额”。
+   - 中国大陆公司按 [内推码子 Skill](skills/campus-job-referral-code/SKILL.md) 查内推码。
+7. **读回后关窗**：`query` 读回该公司，确认岗位链接和 JD 已保存后，才按 [浏览器规则](references/browser-and-submission-gates.md) 关闭该公司由 Agent 打开的标签（信息收集模式）。无法核实的公司保持待查并写明缺口。
+8. **汇报**：逐岗列出公司、岗位、直链、BU（或未披露）、城市、用工类型、方向、JD 依据和纳入/排除理由；按计划列出结果数、打开的详情数、无效页和未查页。只有所有相关计划都查完，才能下“无合适岗位”的结论。
 
-Before a new search batch opens company pages, ask `本轮岗位搜索由一个 AI 执行，还是由多个 AI 共同执行？` alongside other missing Query choices. Record this batch's explicit choice and evidence; an unanswered question does not enable parallel execution. Reuse a same-batch decision without asking again, and ask only missing coordination facts if multiple AI was already requested. Single AI follows this parent normally. For a confirmed multiple-AI search, load [campus-job-parallel-search](skills/campus-job-parallel-search/SKILL.md) before allocation or dispatch.
+## 浏览器
 
-In that branch, participants save each verified company and role immediately in their own evidence deltas; only the coordinator serially writes the shared workbook and reads back the company/role links and full JD. This replaces concurrent direct writes, not the parent's save/readback completion gate. Keep company windows protected until applicable readback and closure conditions pass. Application preparation uses the independent application workflow and a separately confirmed execution-mode choice; search delegation grants no application authority.
+开页前读 [浏览器与页面核验](references/browser-and-submission-gates.md) 和 [标签分组](references/chrome-window-grouping.md)。浏览器按 `求职配置.md` 的设定使用；切换浏览器先说明失败情况并取得用户确认。每个标签记录所属公司，不占用用户的页面和窗口。
 
-Before allocation, proactively ask about explicit requirements for participants, grouping, priorities, time and task quantities. If there are none, invite the user's ideas and offer a reasoned proposal. Confirm that proposal before dispatch; reuse same-batch confirmed choices. Participant counts and business targets are configurable batch values, not fixed Skill limits. The parallel subskill explains the proposal and actual tool-capacity boundaries.
+## 进度汇报
 
-## Referral code (mainland China)
+查询、续跑和汇报前按 [研究进度核对](references/research-progress.md) 从主数据统计覆盖情况，已查但有缺口的公司不能说成“未开始”或“已完成”。向用户汇报公司情况时用 `json_excel_sync.py report --company <公司>`（MCP `recruiting_company_report`）的结果，数字以它为准，不手工统计。
 
-Before delivering any company review HTML, finish referral research for all applicable plan/BU scopes; for mainland China use the referral subskill. When the user mentions 内推码 or a form shows a referral field, also load [campus-job-referral-code](skills/campus-job-referral-code/SKILL.md). It searches Nowcoder (牛客) first, keeps only a code verified for the current cohort, and writes the result to the role rows' `内推码` column. A referral code never changes application authority or the submission gates.
+## 交给投递组件
 
-## 范围与偏好执行契约
+选岗由用户决定。用户确认“岗位待投递”后，按 [正向评审与反向评审](references/company-review-handoff.md) 生成投递批次和正向评审页，用户确认后才交给投递组件；投递结果经反向评审、用户确认后才写回主表。本 Skill 不填表、不上传简历、不提交申请。
 
-每批 Query 和偏好变更先读取 [偏好与逐岗证据](references/preference-contract.md)，按 [空模板](references/preference-template.md) 在私有配置记录硬范围和就业路径/城市/方向三个轴。Open/filter 只用硬范围排除；独立排序不缩小搜索范围。转正实习是否纳入由私有政策决定；conversion_last 纳入同一汇报末尾，不以正式岗覆盖或是否存在正式岗为展示门槛。Record/fill 前展示逐岗报告，closeout 逐岗报告实际填写、保存、提交证据；保留已投和明确选择。
+## 数据接口
 
-## Inputs and fixed choices
-
-- At each new batch's Query stage, run `campus-job-preference-intake` to resolve the company/company-set or industry, region, graduating class, employment type, semantic role families and exclusions, city preferences, and whether the user is **collecting information** or **preparing to select roles and apply**. First restate the user’s goal as target company/domain plus distinct job functions; when their relationship or role-family boundaries are materially ambiguous, ask concise follow-up questions in successive Query rounds until the user confirms the recap. Do not treat an agent inference, title/category match, or past batch choice as confirmed scope. Record the confirmed scope and changes for this batch only; do not turn a current single-region or information-collection choice into a permanent default.
-- At the start of **every later turn** continuing this workflow, reload this Skill and the relevant intake/inventory Skills, then read the confirmed batch scope and identify the current stage: first-pass sweep or user-directed follow-up. During the first pass, choose the next company with no prior coverage in scope; do not resume from the first company merely marked incomplete. Do not rely on recalled chat summaries or treat a company-window cleanup as the end of a still-authorized batch.
-- At the start of every continuing turn, also read the latest relevant entry in `产品管理/clarification.md` and the current approved batch `plans.md`. Treat their timestamped Query snapshot and change log as the source of truth for this batch. A new preference takes effect only from its recorded clarification time, explicitly names the older interpretation it replaces, and remains batch-scoped; never promote it to a permanent user default.
-- Browser priority is **in-app browser → Chrome + computer use → Playwright framework**. Start in the in-app browser. Before each downgrade, show the actual failure, proposed next tier and effect on login/unsaved work, then obtain the user's explicit confirmation for that transition. Confirmation of one transition does not authorize the next. Preserve company tabs and state while waiting; do not automatically switch or bypass a site safety refusal. The in-app browser tool's own Playwright-named control API remains the first tier; it is not use of the separate Playwright framework. Read [browser and submission gates](references/browser-and-submission-gates.md) for the transition and visible-retention rules.
-- Read [browser tab grouping](references/chrome-window-grouping.md) before opening or cleaning up pages. The ten-page Chrome window rule applies only when Chrome was explicitly chosen; it does not select Chrome or impose an unsupported window API on the in-app browser. Each tab keeps its company identity; never repurpose another company's existing tab or a user window.
-- Track every window and tab as agent-created or user-owned, with each tab's company identity and batch intent. In `信息收集` mode, persist each verified in-scope role and its direct URL/JD in the regional sheet, the company's official campus URL in `校招主链接`, and plan facts in `校招计划`; read back the saved links before closing only that company's eligible unprotected **agent-created** tabs and moving on. A blocked or partially checked company remains pending despite window closure. In `准备投递` mode, retain its filtered-result, role-detail and application tabs for user selection and review. Never let finished company investigations accumulate silently as windows.
-- Prefer official company graduate-recruitment pages. A third-party listing may help locate the official page but is not the final job source.
-- **标题＋JD 双重判断（所有地区及正式/实习批次）**：用岗位标题、分类和同义词发现候选，但最终按详情页完整可见 JD 的实际职责和本批已确认的岗位族决定纳入、排除或待核。标题写“产品经理”仍须核实是否实际负责产品发现、需求定义、路线图、功能设计或迭代；标题未写“产品经理”但 JD 实质承担这些职责，也须纳入候选详核。不要把 AI 产品、普通互联网产品经理、产品运营、广告/商业化产品或解决方案岗仅凭名称混为一类；对边界职位记录 JD 依据。零结果必须覆盖同义标题、相关分类及可见 JD 线索，不能只凭一次标题关键词检索。
-- The current accepted résumé files are listed in the job-search profile. Before any application use, verify with the user that they remain the confirmed current versions. Information collection never uploads or fills from them.
-- Matching analysis requires a user-confirmed current résumé and project portfolio or project source directory. If either is unavailable, finish the role record, leave matching fields blank, and request the missing material before form filling.
-- Before workbook work, read [references/workbook-schema.md](references/workbook-schema.md).
-- Regional role tables include a `备注` field after `校招计划`. Record employment-path qualifications and material uncertainties there using official evidence; the note never changes the role's actual employment type or application authority.
-- 状态标签、适用行类型、变更确认和写入由工作区当前 MCP 标签配置及同步脚本统一管理。Skill 不定义标签枚举、空值规则或默认状态，不自行将旧值映射为新值。 Use [campus-job-plan-inventory](../【校招计划盘点】campus-job-plan-inventory/SKILL.md) for the evidence gates and multi-plan aggregation. Put company mergers, stop decisions, closed windows, eligibility and other qualifications in `备注`, not the status cell. A blank role row does not by itself determine the result or authorize another search.
-- Use the `校招主链接` index as the first lookup for a company's verified official campus-recruitment landing page and published application window. If absent or stale, verify and save the official URL before declaring the company complete. A master link never replaces the direct `岗位链接` required for each real role row.
-- Before role filtering for a Stage 1 company or a user-selected Stage 2 gap, run [campus-job-plan-inventory](../【校招计划盘点】campus-job-plan-inventory/SKILL.md). Its first project run initializes coverage for the company list; Stage 1 inventories a no-prior-coverage company once, while Stage 2 refreshes only the selected missing or changed plan/relationship evidence. A blank role row is not evidence of an unvisited company: check its `校招计划` status and dated research first. Never generalize one plan's zero-result search to the whole company, and never reopen an already visited company because it had zero matching roles, no current plan found, inaccessible pages, or partial coverage.
-- Before every new Open/filter company or industry batch, run [campus-job-preference-intake](../【校招批次范围确认】campus-job-preference-intake/SKILL.md). Skip this preflight only when the user has already opened concrete role pages and asked to process them.
-- Before Open/filter, browser filling, or submission, read [references/browser-and-submission-gates.md](references/browser-and-submission-gates.md).
-
-## Mode selection
-
-Choose the narrowest mode implied by the user's latest request:
-
-The workflow has two stages. **Stage 1 — first-pass sweep:** process every in-scope region–company identity with no prior scoped research for the target graduating cohort/current recruiting cycle in the workbook, living Plan, or research log, following workbook order. Research from an older cohort is a source clue, not first-pass coverage for the current cycle. Once any actual company/plan screening for the current cycle is documented, the company/source scope has a prior visit for Stage 1 even if that earlier screen used a narrower role Query; later Query changes become candidate follow-up gaps and do not restart Stage 1. Coverage is reusable across aliases or business-unit rows when the official ATS tenant, recruitment plan, filters, results and role IDs show that the same source scope was already searched; record the mapping to that evidence without reopening the page. If the related company has a distinct applicable plan or source scope that was not covered, inspect only that uncovered scope. For each genuinely uncovered scope, inspect the official campus entry, identify applicable plans, screen the confirmed target role families, inspect in-scope details, record verified roles and sources, and log unresolved pages or facts. **Count definitions are mutually exclusive:** (a) `first-pass-visited` means a current-cycle scoped attempt/outcome is documented, including a blocked or partial attempt; it is not a claim of complete or verified coverage. (b) `first-pass-covered` means the relevant accessible in-scope company/source pass and its required evidence are verified, or the row maps to an identical already-covered shared source. (c) `cycle/evidence-ambiguous-deferred` means a pre-existing partial/blocked record has no reliable cycle or attempt evidence; do not count it as current-cycle coverage or as a verified current-cycle visit, and do not reopen it merely to reconstruct history. List it for the user and continue. A company/status in (a) or (c) never sends it back into the Stage 1 queue. Reuse existing company, plan, role, and source evidence; do not reopen it, repeat a completed filter/page/detail search, or backfill earlier findings during Stage 1. Stage 1 ends when every in-scope identity is either covered, mapped to an identical covered source, has a documented current-cycle attempt/outcome with exact unresolved gaps, or is explicitly listed as cycle/evidence-ambiguous-deferred. Report these outcomes separately; do not describe unresolved or deferred items as covered.
-
-**Stage 2 — targeted follow-up:** begin only after Stage 1 and only for companies and exact gaps selected by the user. When Stage 1 ends, report first-pass coverage and the unresolved-gap list, then wait for the user to choose. A generic `继续` without a named company/gap continues Stage 1 only if unvisited companies remain; it does not authorize Stage 2. Investigate only the named unresolved plan, relationship, result page, role detail, changed source, or missing workbook field. Do not restart a company-wide search because its overall status is partial, a sibling company has another plan, a prior role lacks a row, or a portal is shared. If an already researched role lacks a row or direct link, record it as a backfill candidate and wait until the user selects that gap; it does not block Stage 1. For both stages, record a company-specific outcome and source evidence before advancing; an access blocker remains explicit and incomplete.
-
-1. **Open/filter:** first route through preference intake, including batch intent. With no extra hard role/city restriction, open the official broad target-family view; with explicit hard restrictions, use the site's available official role/city filters or search; soft preferences only group the complete in-scope results. In either branch, open and verify every in-scope role-detail page from the visible filtered results in each relevant plan, while retaining that plan's filtered-result page during verification. A result-list page alone does not complete a batch. In `信息收集` mode, **without waiting for the user to select roles**, write or refresh one regional workbook row per verified in-scope role (direct official `岗位链接`, title, location, complete visible JD, BU, plan; status through the current MCP confirmation flow) and the company's `校招主链接`; read both URL types back from the saved workbook, then close only the eligible agent-created tabs of that company. A research record is not selection or permission to apply. In `准备投递` mode keep useful result and verified detail tabs open; recording discovered roles still does not authorize application forms. Report exact deviations such as pagination, missing filters, invalid detail pages, or login gates.
-2. **Record-only:** only when the user explicitly asks to first record every selected role, read all selected role tabs, write or refresh every workbook row, then assess matching from the confirmed résumé and project portfolio. Do not open, fill, upload to, or submit any application form in this mode.
-3. **Record/fill:** complete the company HTML confirmation and Excel/JSON handoff, then route selected roles to the current application component registered in the workspace Router for authorized preparation.
-4. **Submit:** route to the current application component after company handoff. Current-form approval, exact-target confirmation and receipt verification remain required. Read its actual capability boundary; the search workflow owns subsequent workbook updates from verified outcomes.
-5. **Refresh/status:** a status request is read-only against the workbook, Plan and research log; it does not authorize opening company pages. For an explicit refresh, reload the workbook first, avoid duplicate role links, preserve submitted rows, and refresh only the exact requested companies and gaps. A partial state does not widen the requested scope.
-6. **Close non-priority tabs:** only after a reviewed batch has highlighted roles and the user has confirmed both the retained role list and the separate tab-closing action. This mode never fills or submits an application.
-
-Do not combine Open/filter with Record/fill unless the user has already selected the concrete roles. Open/filter **does include workbook role recording**; the separate Record-only mode is for user-selected existing tabs and never limits information-collection recording. Do not combine Record/fill with Submit in one authorization step unless the user has already reviewed the completed forms and explicitly approved those exact roles.
-
-## 任职资格门禁
-
-搜索筛选、取岗、准备、审核和续跑必须读取[岗位任职资格核对](references/eligibility-check.md)。按完整JD分别判断职责范围与个人资格，必需条件、优先条件及待解释条件分别记录；搜索交付资格结论与个人证据缺口，投递在进入表单前结合当前材料复核。缺证据标待核，不把“岗位记录”、标题或匹配分当作可投；明确冲突不默认推进，用户针对具体缺口以真实材料尝试的指令单独保留。用户已剔除、既有已投与明确选岗不重置，最终目标及表单版本仍审核。
-
-## Match analysis
-
-Run matching only after the complete visible JD has been recorded. Use the current user-confirmed résumé plus verified project materials as evidence.
-
-1. Write `匹配度` as an integer from 0 to 100. It is a capability-fit score only, not an ATS score or hiring probability; city/path preferences and Top5 do not determine selection.
-2. Write `匹配原因` in the form `匹配：...；缺口：...` and name the decisive evidence and domain gaps. Distinguish capabilities visible in the résumé from capabilities found only in the project portfolio.
-3. Do not infer expertise from adjacent exposure, project names, tools, or keywords. Adjacent project exposure does not by itself prove domain mastery. Give the user's explicit self-assessment recorded in the job-search profile of proficiency priority over superficial keyword matching.
-4. Do not invent experience to satisfy a JD. If a requirement has no evidence, record it as a gap. Keep duplicate roles with materially identical JDs at the same capability score unless the JD requirements change the capability fit (city preference alone never changes it).
-5. Matching analysis does not authorize résumé editing. Tailoring résumé content is a separate user-approved document task and must preserve factual boundaries.
-6. For a reviewed batch with at least one scored real role, mark only the five highest `匹配度` rows (or all rows when fewer than five are scored) with a pale-yellow fill across the full role row. Use the current worksheet row order only to break an equal-score tie. Do not color company placeholders, change any score or status, or recolor rows outside that top-five set.
-
-Top5 仅为能力分高亮容量，不自动选岗或跨轴优先；用户明确选择不被该展示截断。
-
-## Close non-priority role tabs
-
-Use this mode only after the user has reviewed the highlighted capability-highlighted roles.
-
-1. Restate the exact company and retained role titles, locations, and direct role links. Ask the user to confirm that these are the priority roles to retain.
-2. After that confirmation, ask separately whether the other identified selected role-detail tabs for that company may be closed. A request to review or prioritize roles does not itself authorize closing tabs.
-3. Match each candidate tab to a recorded direct `岗位链接` before closing it. Close only known non-retained role-detail tabs for that company.
-4. Preserve the company-level campus master-link tab, filtered result tabs, login or account pages, retained role tabs, and any tab whose ownership or identity is unclear.
-5. Report the number of closed tabs and the retained role list. Closing tabs changes no workbook data, application form, upload, or submission state.
-
-## Close a completed company window
-
-Use this mode after the current company investigation has a recorded outcome, including an explicitly pending access blocker. The confirmed batch choice `信息收集` is advance authorization to close that company's agent-created, unprotected tabs; `准备投递` means retain it until the user separately authorizes that company's closure. A request to start the next company alone is not closure authority in `准备投递` mode.
-
-1. At the end of a company batch, state whether its recorded company tabs remain active or are ready to close. If the batch intent was not confirmed, ask before closing or opening another company window. **Mandatory dual-link gate in `信息收集`:** for every verified in-scope role, save and read back its direct official `岗位链接` and role facts in the correct regional sheet; save and read back this company's current verified official campus URL, cohort and published application window in `校招主链接` (reuse an already-current saved row). Also read back the plan rows and record the filtered-result counts, unresolved details and unsearched pages. Chat text, a plan row, a search page, a generic social-hire page or a saved company URL without saved role URLs does not pass. With zero verified roles, require evidence that every relevant accessible plan and result page was checked; zero is not a missing-link exception for discovered roles. If an official campus URL or any discovered role detail/link cannot be verified, leave the company explicitly pending with attempted sources and reason; never count it as completed coverage. A pending company's unprotected tabs may still be closed under the confirmed information-collection rule after recording the blocker, then the batch continues to the next company.
-2. Before closing, identify the company, confirm each target tab was created by Codex for that company, and inventory the window's other companies and protected tabs. Never close a user-owned window, a window with unclear ownership, or any window repurposed by the user.
-3. If the window contains a user-selected/retained role, an application form waiting for review, a submitted-receipt page, or a login/account page needed for the next approved action, retain it and obtain separate explicit confirmation to close that exact window. Batch-level `信息收集` authorization does not dispose of protected pages. Never close a user-owned or ownership-unclear window under this batch rule.
-   A role-detail page opened by Codex solely for research is **not** protected merely because it is a detail page. Check the user's actual selection or retention instruction before classifying it; record its direct URL before closing.
-4. Close only the current company's eligible Agent tabs after verified completion in `信息收集` mode, or after explicit company-specific closure approval in `准备投递` mode. Preserve other companies in a shared window; close the entire window only when every tab is Agent-owned, eligible to close and unprotected. Follow the 10-page grouping rule for subsequent pages.
-5. Verify that only the approved target tabs are gone, then report the company, number of tabs closed, and any protected pages left open. Only report the company as browser-closed after this check.
-6. In Stage 1, resume at the next company with no prior coverage immediately after the closure check; incomplete status does not reorder or reopen an already visited company. Stage 2 resumes only at the next user-selected gap. Do not end the turn at a cleanup checkpoint unless the user asks to stop or a real blocker prevents further in-scope progress.
-
-## Open and filter
-
-1. Run `campus-job-preference-intake` in the current batch's Query stage. Resolve company/industry, region, graduating class, batch intent, employment type, role, and city; ask only for a materially missing choice. For a confirmed formal campus batch for the profile's target graduating class, search graduate/full-time roles, not internships, unless the user explicitly expands the scope. A site's `Full Time` category may also contain experienced social-hire roles, so it never proves graduate eligibility by itself.
-2. Before opening a company page or filtering results, reconcile that company against the saved workbook, research log, and approved batch Plan. Review regional role rows, company master links, applicable plan rows, and prior source coverage for the target cohort/current cycle (official ATS tenant, plan ID, filters, result counts/pages, job IDs and unresolved gaps). Classify it as (a) no prior coverage of this current-cycle source scope, eligible for Stage 1; (b) already visited or covered by a documented shared source for this cycle, including any partial or blocked outcome, excluded from the Stage 1 queue; (c) an existing partial/blocked status with unclear cycle/evidence, deferred and listed for user decision without reopening; or (d) a user-selected Stage 2 follow-up with an exact authorized gap. Prior-cycle research is reusable source context but does not count as current-cycle coverage when the prior cycle is clear. A plan status or missing role row alone never authorizes reopening. Apply the latest batch Query to saved JDs. Treat existing records as evidence to reuse; do not repeat them or change workbook data during the audit.
-3. Record the stage and compact coverage delta before browsing: existing evidence and jobs; source/plan scopes already checked; exact gaps; and why this company is eligible now. Stage 1 accepts only a genuinely uncovered company or source scope. Stage 2 accepts only a gap the user selected. An existing role/detail/page must not be reopened because another plan or pagination remains open; a missing workbook row must not trigger backfill during Stage 1.
-4. In Stage 1, choose the next no-coverage company in workbook order. In Stage 2, choose only from the user's selected gap list. Check `校招主链接` and prior records first; navigate directly to the exact uncovered item. For a shared ATS or parent-company portal, reuse already checked pages, job IDs and official source evidence across aliases/business units. Open the shared portal only when the selected company has a distinct applicable plan or an exact missing fact that cannot be established from saved evidence; do not repeat the parent-wide search.
-5. In Stage 1, only after recording the delta, open a new tab for a company with no prior scoped research in the selected browser and open its official campus/graduate entry. Follow browser tab grouping; the ten-page Chrome window rule applies only when Chrome was explicitly chosen. A saved company URL by itself is not a completed plan/role pass, so it may be reused as the starting point. In Stage 2, do not open a browser or create a window when saved evidence resolves the selected gap; if live evidence is needed, open a company-labelled tab under the same grouping rule and navigate directly to that exact plan, result, or role. If the selected browser cannot open the next required surface, report the limitation and request the next-tier downgrade confirmation; do not switch before approval or repurpose another company's tab or a user window. If the site does not expose the target cohort, retain the nearest official graduate/campus page and state the observed limitation.
-6. Run `campus-job-plan-inventory` only for the current Stage 1 company or user-selected Stage 2 gap. During Stage 1, enumerate applicable plans once and screen each in-scope plan; do not reopen existing partial companies. During Stage 2, refresh only the selected plan or relationship that is missing, stale, changed, or unresolved. Never repeat completed searches for saved roles/pages. Do not claim a company has no matching role based on one plan.
-7. Once a verified official master link is established, maintain one entry for that company in `校招主链接`, with company, region, URL, applicable cohort, and a published `投递窗口`. Record a disclosed window as `YYYY年MM月DD日-YYYY年MM月DD日可投递`; if the official source publishes a refresh date but no closing date, state that exact limitation rather than inferring an end date. Do not store a direct role page in this index or create duplicate company entries. This is compulsory for **every company** unless its current verified row already exists; before moving on, apply the **dual-link gate** in **Close a completed company window**.
-8. Traverse the relevant plans one at a time. Apply the resolved employment type together with the current batch Query; interpret each target-category result by its substantive JD and the confirmed hard role/city scope in each plan's available official filters or search; soft ordering never hides lower-preference in-scope results; report unavailable filters instead of guessing a substitute. After filtering, read back the selected chips/checkboxes and URL to verify the actual employment type, role and city filters; clear a stale `Intern` choice before treating results as formal roles. Retain the resulting plan-filtered page as the master page. Enumerate every visible in-scope result across its available pagination, then open each role from its visible official result card in a separate detail tab (or the site's equivalent non-destructive navigation) without replacing the master page. Verify that every loaded detail page shows the role title, substantive job description, target graduating class or graduate eligibility, and an experience requirement compatible with a new graduate. **Internship-to-full-time conversion check:** when the user selects conversion_last and the official campus/graduate entry or a relevant target-family result surfaces an internship while the current Query is formal/full-time, inspect that target-family internship's official detail for explicit conversion wording (e.g. 转正、留用、转正机会) and its cohort, duration, assessment and other eligibility conditions. Record a role only when the JD is in-scope and the official source explicitly offers a conversion opportunity; preserve `实习` in its title and source plan and label it `实习转正` in `备注` and place it last in the same report under conversion_last, quoting the material official wording and conditions. Never call it a formal/full-time role or imply conversion is guaranteed. Ordinary internships with no explicit conversion opportunity remain out of scope; ambiguous claims stay pending and are not inferred. Do not construct a role-detail URL from a listing ID. If the result set is too broad to inspect, ask the user to narrow the preference and mark the batch pending rather than complete.
-9. Keep the plan-filtered master page and every valid in-scope role-detail tab in company-labelled tabs under the 10-page window grouping rule while verifying that company. Apply the detail-page checks in [references/browser-and-submission-gates.md](references/browser-and-submission-gates.md); a 404, blank, expired, or generic landing page is not a verified role. Retry one failed detail from its visible result card, then list it as unresolved if still invalid. Do not close user-opened tabs. For **each** verified in-scope detail, immediately deduplicate and write or refresh its regional role row using [references/workbook-schema.md](references/workbook-schema.md), including the direct URL and visible JD; do not defer all role recording until after the company. Write matching fields when required candidate materials are available, otherwise leave them blank. After the company and role links are saved and read back, use **Close a completed company window**; in application-preparation mode retain the window. Opening a verified in-scope detail authorizes this information record, but never an application form, upload, or submission.
-10. Report each role’s company/title/direct URL/BU or 未披露/cities/employment/direction/JD basis and reason, and actual fill/save/submit state (not_started in information collection); also report results by company and plan: resolved employment type and verified selected filters, total in-scope result count, number of valid detail tabs opened, verified role titles and direct links, invalid/inaccessible details, and any plan or result page not searched. Only after all relevant accessible plans and their in-scope results are checked may a zero-result conclusion be made for the company; a generic `Full Time` listing containing only senior roles is not a checked graduate plan, and an unresolved detail-page failure must remain explicit.
-11. Provide a screenshot or other visible browser evidence for each completed batch and list pages that require login, CAPTCHA, SMS, or user action.
-
-## Record and fill：交给独立投递流程
-
-先完成[公司 HTML 核对与 Excel/JSON 交接](references/company-review-handoff.md)，用户确认最终计划/岗位/BU/地点/次序后，调用 Router 登记的当前独立申请组件。复用已确认的公司方案和次序，仅补投递材料、准备授权、执行方式等缺失项。搜索授权不授予填表或提交；一般选岗授权不替换用户已确认方案。最终表单审核与具体目标提交确认仍由投递流程执行。
-
-## Record-only
-
-Use this exception only after an explicit user instruction to record every selected role before any application handling.
-
-1. Read each selected role's title, explicit work location, complete visible JD, BU or owning organization, direct role URL, company, region, and source campus plan. Work from verified detail tabs for the roles the user selected, regardless of who opened those tabs; do not open an application form.
-2. For each role, de-duplicate by direct role URL, then write or refresh one row with its verified `校招计划`, official work location, complete visible JD. Status assignment follows the current MCP policy and user confirmation. Record a verified official quota, cooling period, annual refresh, or immutable post-submission restriction in `校招冷静期`; otherwise leave that cell blank. If the official location is absent, leave `工作地点` blank or write `未披露`, without guessing from related text. Keep one row per role and leave placeholder role facts blank; status follows the current MCP policy.
-3. When a company's official FAQ or announcement publishes an application-count rule, write it verbatim in the form `YYYY-MM-DD至YYYY-MM-DD：N次；…` with its source; reuse rules already verified in the job-search profile. Before any actual submission, recheck the logged-in account's remaining count.
-4. After all role facts are recorded, apply the Match analysis rules to every recorded role and write `匹配度` and `匹配原因`. If the confirmed résumé or project portfolio is unavailable, leave both cells blank and report the missing prerequisite.
-5. Recalculate, inspect the changed rows, scan formula errors, export, and visually review the changed range. Report the exact number of roles written and assessed, plus any tab whose details could not be read.
-6. Do not upload a résumé, type personal information, accept form declarations, or submit. When the user later authorizes form completion, return to **Record/fill** and refresh the existing row rather than inserting a duplicate.
-
-## Regional role-table organization（地区岗位表行组织基础逻辑）
-
-This is the standing row-organization logic for every regional role sheet listed in the job-search profile— applied whenever role rows are written, refreshed, re-sorted, or audited — and equally to any role-summary file generated from those sheets. It is base data logic, not an optional export mode.
-
-1. **公司归组**：同一公司的岗位行必须连续存放；新核实的岗位写入本公司块内，不得追加到表尾造成同公司行分散。公司块之间的顺序保持该公司首次录入顺序，除非用户另有要求。
-2. **同类相邻**：同一公司块内，同名或同岗位族的行保持相邻；身份仍按官方 ID/规范直链，不能按名称合并。
-3. **时间排序**：公司块内按实习开始时间/申请时间从近到远排序；起止未披露的排在该块末尾；已过期或待核验的岗位保留行并在 `备注` 标明时效，不静默删除。
-4. **岗位类型优先级顺序由用户提供**：每批 Query 先向用户要本批默认岗位类别次序；新批重新确认，不能沿用上一批。续跑首回合若没有本批确认，也先问，确认后才能写行、重排或生成汇总。每家公司开始申请操作前，先用同一份逐岗报告展示公司、BU、办公地、岗位和直链，再确认相对默认次序有没有变动；确认后才继续。将该报告和确认传给投递助手，衔接它的表单前汇报与最终目标/版本门禁，不另建重复清单。各轴分组保留弱优先/平级，不能加权代选；时间排序在同组内保留，明确选岗不被替换。
-5. **汇总文件内容标准**：从地区表生成的岗位汇总文件同样遵守上述归类与排序；每岗位一行，按招聘主体内官方岗位 ID 优先、无 ID 时按规范直链去重；同名不同 BU/城市/ID 保留，一个多城市 ID 不重复计数；默认列：序号、公司、岗位名称（英文）、岗位名称（中文）、岗位分类、实习开始时间/时段、岗位JD（英文）、岗位JD（中文全文翻译）、工作地点、岗位链接、备注。中文岗位名与中文 JD 必须是对官方英文原文的**完整忠实翻译**（逐段覆盖全部小节、保留原文段落与编号结构；公司名/产品名/技术缩写/日期/数字/链接保留原文），中文摘要不得替代全文翻译。
-
-## Submit and verify：独立投递流程负责
-
-只交接已确认且同步的公司方案。投递端复核当前账号名额、岗位与材料，按当前审核版本和确切目标授权提交；申请组件仅按其当前契约保存结果；搜索端依据已核实回执另行更新 Excel 并导出 JSON，不要求申请组件同步外部账本。搜索端不凭“推荐”“岗位记录”或 HTML 确认直接点击最终提交。
-
-## Verification and records
-
-查询、续跑、外部交付验收及进展汇报前，必须加载[研究进度与标签强制核对](references/research-progress.md)，读取当前Excel标签和备注及有效流水。交付/汇报前运行其进度校验脚本；有本届已查证据的公司不得仅以“尚未推进”描述或计作完全未做。
-
-
-- Follow the active Plans listed in the job-search profile and project Router. On a fresh conversation, reload this Skill and read the confirmed scope, workbook, Plan, and research log. Determine the current stage before choosing a company. Stage 1 selects the next company with no prior scoped coverage; Stage 2 selects only user-approved gaps. Never treat `部分盘点` as an instruction to reopen a company or backfill a prior role. In information collection, write each newly verified in-scope role row immediately.
-- Use the Spreadsheets skill for every workbook edit and perform data, formula/error, export, and visual checks proportionate to the changed range.
-- Use browser-acceptance-screenshot for real browser checkpoints: filtered result and verified role detail when preference-filtered, completed pre-submit form, and post-submit receipt.
-- Update task, scope, risk, validation, acceptance, and Plan records when their state materially changes.
-- Never store passwords, cookies, OTPs, government-ID contents, or other secrets in the workbook, Skill, screenshots, or Markdown ledgers.
-
-## 数据建设闭环
-
-执行[数据建设与固定脚本](references/storage-workflow.md)：初始化研究检查，逐项采集并写入；使用增量脚本同步原表、九张共享明细、整本业务 JSON 与批次 HTML/JSON。独立记录可为空的志愿，不能拿处理次序代替。缺项保持待查并输出清单，未完成研究或不同步不可交接。偏好确认 Skill 只传递范围和用户决定，具体写入由搜索主 Skill 执行。
+[招聘数据 MCP 与固定脚本](references/recruiting-data-mcp.md) 列出 MCP 工具与命令行的对应关系。接口调用成功不等于事实已查齐或用户已确认。
