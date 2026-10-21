@@ -2,6 +2,8 @@
 
 搜索组件开始处理投递需求时，先运行 `application_requirements.py begin`（MCP `recruiting_application_requirements_begin`）。Hook 记录真实会话与回合上下文；同回合循环复用当前选择，新用户回合重新初始化，半自动逐回合推进同样重置。
 
+宿主接线：Codex/DSH 和 Claude 的 `SessionStart`、`UserPromptSubmit` 调用 `application_requirements.py --workspace <工作区> hook`；Antigravity 的 `SessionStart`、`PreInvocation` 调用同一脚本，追加 `--host agy --event <事件>`。Hook 只做回合初始化；没有启用该需求流程的对话返回空结果，组件实际启动后才提示当前流程。DSH 修改注册后须重载；不要把手动调用脚本当成宿主已自动触发。
+
 ## 唯一需求入口
 
 - 临时表：`产品管理/user_applicaiton_requirements_temp.json`，拼写保持接口约定，只覆盖写入。

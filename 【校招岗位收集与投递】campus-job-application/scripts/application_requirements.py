@@ -44,6 +44,8 @@ def normalize(requirements):
         raise ValueError('不支持的需求参数；当前支持 公司、地区、浏览器')
     out = dict(requirements)
     companies = out.get('公司')
+    if companies is None:
+        out.pop('公司', None)
     if isinstance(companies, str):
         companies = [companies]
     if companies is not None:
