@@ -10,7 +10,8 @@
   propose   只读：生成“当前状态是X，更新状态是Y”的核对文本，不改任何文件
   confirm   用户明确确认后，把变更逐行记入确认台账并更新主数据 JSON（不写 Excel）
   report    只读：一家或多家公司的汇报（主链接、计划、管培/产培、岗位按状态、名额与占用）
-  upsert    按业务键增改主数据 JSON 的非状态字段（新岗位、JD、链接等）；不能改投递状态
+  upsert    按业务键增改主数据 JSON 的非状态字段（新岗位、JD 等）；不能改投递状态，也不能更换已有岗位的链接
+  relink    更换已有岗位的链接：--preview 生成“岗位链接 X → Y”给用户看，确认后带 --quote 执行；状态不变、无需重新确认，志愿顺序等投递数据随行迁移
   write     JSON→Excel：标签门禁→状态确认门禁→写出→下拉校验→逐格读回→回写绑定（不做快照，主数据只留一份“上一版”）
   defer     用户选择“下一轮再写入”时登记延后（绑定当前 JSON 数据摘要）
   pending   供 Hook 使用：是否存在未写入 Excel 的 JSON 改动、用户是否已选择延后
@@ -518,9 +519,16 @@ def link_key(rk):
     return 'link:' + key_id({'sheet': rk['sheet'], 'company': rk['company'], 'link': rk['link']})
 
 
+def identity_map(ctx):
+    """relink 登记、尚未写入 Excel 的身份变更：新业务键 → 旧业务键（Excel 里这一行还是旧键）。"""
+    return {key_id(c['new_key']): key_id(c['old_key'])
+            for c in ctx.ledger().get('identity_changes', []) if not c.get('applied_at')}
+
+
 def status_changes(ctx, master):
     """Excel 当前状态 → JSON 目标状态 的逐行差异。"""
     current = excel_statuses(ctx)
+    renamed = identity_map(ctx)
     changes = []
     for name, s, idx, row in iter_status_rows(ctx, master):
         rk = row_key(name, row, idx)
@@ -529,6 +537,8 @@ def status_changes(ctx, master):
         frm = current.get(kid)
         if frm is None and rk.get('link'):
             frm = current.get(link_key(rk))
+        if frm is None and kid in renamed:  # relink 换过链接：按用户确认的旧业务键找回 Excel 中的原行
+            frm = current.get(renamed[kid])
         frm = frm or ''
         if frm != to:
             changes.append({'key': json.loads(kid), 'from': frm, 'to': to})
@@ -646,6 +656,9 @@ def write(ctx):
             e['applied_at'], e['applied_workbook_sha256'] = applied, sha
         else:
             e['superseded_at'] = applied
+    for c in ledger.get('identity_changes', []):
+        if not c.get('applied_at'):
+            c['applied_at'] = applied
     ledger['deferrals'] = []
     save_json(ctx.ledger_path, ledger)
     refresh_digest(master)
@@ -971,6 +984,10 @@ def upsert(ctx, items):
                 if v and col in idx:
                     set_cell(row, idx[col], v)
         for col, v in fields.items():
+            if (col == LINK_COL and hits and v not in (None, '')
+                    and str(v) != str(cell_value(row, idx[LINK_COL]) or '')):
+                raise SystemExit(f'upsert 不能更换已有岗位的链接：{describe(key)}。岗位链接是行身份的一部分，'
+                                 '请用 relink（先 --preview 给用户看“岗位链接 X → Y”，确认后带 --quote 执行）')
             if isinstance(v, str) and len(v) > 32767:
                 raise SystemExit('禁止截断单元格')
             if col in ctx.field_rules and v not in (None, ''):
@@ -1031,6 +1048,104 @@ def ensure_company_row(s, idx, company):
     first = min(rows, key=lambda r: r['row'])
     insert_row(s, idx, first['row'], first)
     return True
+
+
+HANDED_OFF = ('已交接', '进行中')
+
+
+def relink(ctx, items, quote, preview=False):
+    """更换已有岗位行的岗位链接。岗位链接是行身份的一部分，所以换链接不走 upsert：
+    preview 只返回给用户看的逐行“岗位链接 X → Y”，不改任何文件；用户确认后带原话执行——
+    改链接与超链接；把该行的确认记录迁到新业务键；登记身份变更（写 Excel 时据此认出同一行，状态不变、无需重新确认）；
+    把 公司.json 里的行身份迁到新链接（志愿顺序、城市选项等随行保留）。
+    该岗位在已交接/进行中的投递批次里时拒绝，须先完成投递与反向评审。"""
+    if not preview and (not quote or not quote.strip()):
+        raise SystemExit('必须提供用户确认原话')
+    master = ctx.load_master()
+    store = ctx.cfg.get('companyStore') or {}
+    batch_file = ctx.root / store.get('batchFile', '岗位交接/投递批次.json')
+    batch = json.loads(batch_file.read_text(encoding='utf-8')) if batch_file.exists() else None
+    plan, lines, taken = [], [], set()
+    for d in items:
+        old_key = normalize_key({k: d.get(k) for k in ('sheet', 'company', 'link', 'title')})
+        if old_key.get('placeholder'):
+            raise SystemExit(f'{describe(old_key)} 是公司行，没有岗位链接可换')
+        s, idx, row = find_row(ctx, master, old_key)
+        if LINK_COL not in idx:
+            raise SystemExit(f"{s['name']} 没有“{LINK_COL}”列")
+        old = str(cell_value(row, idx[LINK_COL]) or '')
+        new = str(d.get('new_link') or '').strip()
+        if not re.fullmatch(r'https://\S+', new):
+            raise SystemExit(f'{describe(old_key)} 新链接必须是完整的 https 链接：{new!r}')
+        if new.rstrip('/') == old.rstrip('/'):
+            raise SystemExit(f'{describe(old_key)} 新旧链接相同')
+        norm = (s['name'], old_key['company'], new.rstrip('/'))
+        clash = [r['row'] for r in s['rows'] if r['row'] > 1 and r is not row
+                 and cell_value(r, idx[COMPANY_COL]) == old_key['company']
+                 and str(cell_value(r, idx[LINK_COL]) or '').rstrip('/') == new.rstrip('/')]
+        if clash or norm in taken:
+            raise SystemExit(f'{describe(old_key)} 新链接已被同公司其它行使用' + (f'（第{clash[0]}行）' if clash else '（本次输入重复）'))
+        taken.add(norm)
+        status = cell_value(row, idx[ctx.column]) or ''
+        in_batch = bool(batch) and old and any(
+            c.get('公司') == old_key['company'] and str(r.get('岗位链接') or '').rstrip('/') == old.rstrip('/')
+            for c in batch.get('companies', []) for r in c.get('岗位', []))
+        if in_batch and batch.get('state') in HANDED_OFF:
+            raise SystemExit(f"{describe(old_key)} 在已交接的投递批次 {batch.get('batchId')} 中（{batch.get('state')}），"
+                             '须先完成投递与反向评审再换链接')
+        new_key = {**old_key, 'link': new}
+        line = (f"{describe(old_key)}：岗位链接「{old or '空'}」→「{new}」"
+                f"（投递状态「{status or '空'}」保持不变，志愿顺序等投递数据随行迁移）")
+        if in_batch:
+            line += f"；该岗位在待评审批次 {batch.get('batchId')} 中，换链接后须重新生成批次（forward）"
+        plan.append((s, idx, row, old_key, new_key, new, line))
+        lines.append(line)
+    if preview:
+        return {'show_user_exactly': lines,
+                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行'}
+    ledger = ctx.ledger()
+    changes = ledger.setdefault('identity_changes', [])
+    at = now()
+    for s, idx, row, old_key, new_key, new, line in plan:
+        set_cell(row, idx[LINK_COL], new)
+        cell = next(c for c in row['cells'] if c['column'] == idx[LINK_COL])
+        cell['hyperlink'] = {'target': new, 'location': None}
+        ok, nk = key_id(old_key), key_id(new_key)
+        for e in ledger['entries']:
+            if key_id(e['key']) == ok:
+                e['key'] = new_key
+        prior = next((c for c in changes if not c.get('applied_at') and key_id(c['new_key']) == ok), None)
+        if prior and key_id(prior['old_key']) == nk:  # 改回 Excel 里的原链接：不再需要身份变更
+            changes.remove(prior)
+        elif prior:  # 写 Excel 前连续换了两次：仍从 Excel 里的原键直接指向最新键
+            prior.update({'new_key': new_key, 'shown_to_user': line, 'user_quote': quote.strip(), 'confirmed_at': at})
+        else:
+            changes.append({'id': uuid.uuid4().hex, 'old_key': old_key, 'new_key': new_key, 'shown_to_user': line,
+                            'user_quote': quote.strip(), 'confirmed_at': at, 'applied_at': None})
+    moved = []
+    base = ctx.root / store.get('dir', '岗位交接/公司')
+    if base.exists():
+        remap = {key_id(o): n for _, _, _, o, n, _, _ in plan}
+        for cf in sorted(base.glob('*/*/公司.json')):
+            doc = json.loads(cf.read_text(encoding='utf-8'))
+            hit = False
+            for r in doc.get('roles', []):
+                nk = remap.get(key_id(r.get('主表行身份') or {}))
+                if nk:
+                    r['主表行身份'] = nk
+                    hit = True
+                    moved.append(describe(nk))
+            if hit:
+                doc['updatedAt'] = at
+                save_json(cf, doc)
+    probs = validate_labels(ctx, master)
+    if probs:
+        raise SystemExit('标签门禁拒绝：' + '；'.join(probs[:10]))
+    refresh_digest(master)
+    save_master(ctx, master)
+    save_json(ctx.ledger_path, ledger)
+    return {'relinked': len(plan), 'company_files_updated': moved, 'excel_written': False,
+            'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
 
 
 KEEP_STATUSES = ('岗位已投递', '岗位推进中', '岗位offer', '岗位终止')
@@ -1301,6 +1416,10 @@ def main():
     p.add_argument('--preview', action='store_true')
     p.add_argument('--drop-company', action='append', default=[], help='岗位删光后连同公司行整家删除的公司（可多次）')
     p.add_argument('--mark-research', action='store_true', help='公司仍有其它岗位时也把公司行改回“待搜索”，标明需重新搜索')
+    p = sub.add_parser('relink')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link,title,new_link}]，link/title 为该行当前值')
+    p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
+    p.add_argument('--preview', action='store_true')
     p = sub.add_parser('set-quota-rules')
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{公司,范围,适用计划/批次,投递上限,是否分BU可平行投递,是否可以滚动投递,规则原文,来源/核验日期,原文出处文件}]；按公司整体覆盖。规则原文须为来源原文逐字摘抄（无官方说法写“公司未披露”），来源/核验日期格式“来源：<公司>-<岗位或页面> 核验日期：YYYY-MM-DD”')
     p = sub.add_parser('set-sheet-rows')
@@ -1338,7 +1457,8 @@ def main():
                'label_problems': len(probs), 'label_problem_samples': probs[:20],
                'field_problems': len(fprobs), 'field_problem_samples': fprobs[:20],
                'cells_json_vs_excel_diff': changed, 'excel_only_sheets': extra,
-               'status_changes': len(ch), 'status_changes_without_user_confirmation': len(miss)}
+               'status_changes': len(ch), 'status_changes_without_user_confirmation': len(miss),
+               'link_changes_waiting_for_excel': len(identity_map(ctx))}
         code = 1 if (probs or fprobs or miss or leftover or over) else 0
     elif a.cmd == 'status':
         m = ctx.load_master()
@@ -1380,6 +1500,12 @@ def main():
         else:
             with exclusive(ctx):
                 out = reset_rows(ctx, read(a.input), a.quote, drop_companies=a.drop_company, mark_research=a.mark_research)
+    elif a.cmd == 'relink':
+        if a.preview:
+            out = relink(ctx, read(a.input), a.quote, preview=True)
+        else:
+            with exclusive(ctx):
+                out = relink(ctx, read(a.input), a.quote)
     elif a.cmd == 'set-quota-rules':
         with exclusive(ctx):
             out = set_quota_rules(ctx, read(a.input))

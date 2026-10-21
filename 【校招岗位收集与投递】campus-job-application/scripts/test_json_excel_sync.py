@@ -405,6 +405,52 @@ class SyncTests(unittest.TestCase):
         self.assertEqual([v['公司'] for r, v in S.quota_records(master)], ['甲公司'])
         self.run_cmd('write')
 
+    def relink_item(self, i, new, old=None):
+        return {"sheet": "中国大陆", "company": "甲公司", "link": old or f"https://a.example/{i}", "title": f"产品经理{i}", "new_link": new}
+
+    def test_relink_keeps_status_without_reconfirmation(self):
+        """换链接：upsert 不能直接改已有行链接；relink 预览不改文件、无原话不执行；确认后写 Excel 状态不变、不要求重新确认。"""
+        self.migrate()
+        self.run_cmd('confirm', '--input', self.items([self.role(0, '岗位待投递')]), '--quote', '选0')
+        self.run_cmd('write')
+        key0 = {k: v for k, v in self.role(0, '').items() if k != 'to'}
+        p = self.run_cmd('upsert', '--input', self.items([{"key": key0, "values": {"岗位链接": "https://a.example/0-new"}}]), ok=False)
+        self.assertIn('请用 relink', p.stderr)
+        before = (self.root / '岗位交接/工作簿全量.json').read_bytes()
+        out = json.loads(self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-new')]), '--preview').stdout)
+        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0：岗位链接「https://a.example/0」→「https://a.example/0-new」'
+                                                    '（投递状态「岗位待投递」保持不变，志愿顺序等投递数据随行迁移）'])
+        self.assertEqual(before, (self.root / '岗位交接/工作簿全量.json').read_bytes())
+        self.assertIn('原话', self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-new')]), ok=False).stderr)
+        self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-new')]), '--quote', '换成官网新链接')
+        chk = json.loads(self.run_cmd('check', ok=False).stdout)
+        self.assertEqual((chk['link_changes_waiting_for_excel'], chk['status_changes_without_user_confirmation']), (1, 0))
+        self.assertEqual(json.loads(self.run_cmd('write').stdout)['status_changes_applied'], 0)
+        ws = load_workbook(self.root / 'book.xlsx')['中国大陆']
+        self.assertEqual((ws.cell(3, 9).value, ws.cell(3, 9).hyperlink.target, ws.cell(3, 10).value),
+                         ('https://a.example/0-new', 'https://a.example/0-new', '岗位待投递'))
+        self.assertEqual(json.loads(self.run_cmd('check').stdout)['link_changes_waiting_for_excel'], 0)
+
+    def test_relink_rejects_bad_input_carries_confirmations_and_chains(self):
+        """新链接与同公司其它行重复、非 https、公司行都拒绝；未写入的确认随行迁移；写 Excel 前连续换两次只保留一条身份变更。"""
+        self.migrate()
+        self.run_cmd('write')
+        for item, msg in ((self.relink_item(0, 'https://a.example/1'), '同公司其它行使用'),
+                          (self.relink_item(0, 'http://a.example/x'), 'https'),
+                          ({"sheet": "中国大陆", "company": "乙公司", "new_link": "https://b.example/1"}, '公司行')):
+            self.assertIn(msg, self.run_cmd('relink', '--input', self.items([item]), '--preview', ok=False).stderr)
+        self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-v2')]), '--quote', '第一次')
+        self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-v3', 'https://a.example/0-v2')]), '--quote', '第二次')
+        self.run_cmd('confirm', '--input', self.items([self.role(1, '岗位待投递')]), '--quote', '选1')
+        self.run_cmd('relink', '--input', self.items([self.relink_item(1, 'https://a.example/1-new')]), '--quote', '1也换')
+        ledger = json.loads((self.root / '产品管理/确认.json').read_text(encoding='utf-8'))
+        self.assertEqual(sorted((c['old_key']['link'], c['new_key']['link']) for c in ledger['identity_changes'] if not c.get('applied_at')),
+                         [('https://a.example/0', 'https://a.example/0-v3'), ('https://a.example/1', 'https://a.example/1-new')])
+        self.assertEqual(json.loads(self.run_cmd('write').stdout)['status_changes_applied'], 1)  # 只有 1 的「待筛选→待投递」
+        ws = load_workbook(self.root / 'book.xlsx')['中国大陆']
+        self.assertEqual([(ws.cell(r, 9).value, ws.cell(r, 10).value) for r in (3, 4)],
+                         [('https://a.example/0-v3', '岗位待筛选'), ('https://a.example/1-new', '岗位待投递')])
+
     def test_company_labels_live_in_own_group_file(self):
         """公司状态标签单独成组（一组一个文件）：岗位行只能用岗位组、公司行只能用公司组；跨组重名、组文件缺失都拒绝加载。"""
         p = self.run_cmd('propose', '--input', self.items([self.role(0, '已有岗位')]), ok=False)

@@ -1,6 +1,6 @@
 # campus-job-skills
 
-**当前版本：v2.0.0 · 2026-10-21**
+**当前版本：v2.0.1 · 2026-10-21**
 
 ## 本次更新：主数据 JSON、标签分组与搜索→投递中间区域
 
@@ -16,11 +16,13 @@
 | 环节 | 入口 |
 |---|---|
 | 搜索与证据 | 搜索 MCP `campus-search`（`search_mcp.py`） |
-| 主数据读写与状态确认 | `json_excel_sync.py`：`query`、`report`、`upsert`、`propose`、`confirm`、`write`、`set-quota-rules` |
+| 主数据读写与状态确认 | `json_excel_sync.py`：`query`、`report`、`upsert`、`relink`、`propose`、`confirm`、`write`、`set-quota-rules` |
 | 搜索 → 投递交接 | `company_store.py`：`refresh`、`set-order`、`forward`、`forward-confirm`、`reverse`、`reverse-confirm` |
 | 门禁 | `status_sync_hook.py` |
 
 ## 更新日志
+
+- **v2.0.1 · 2026-10-21**：新增 `relink` 换链接（搜索 MCP `recruiting_link_change_preview/confirm`）：用户确认“岗位链接 X → Y”后执行，投递状态不变、写 Excel 不要求重新确认，确认记录与志愿顺序随行迁移；`upsert` 不再能直接改已有岗位的链接。修复同步遗漏的 Skill 间相对链接改写。
 
 - **v2.0.0 · 2026-10-21**：主数据改为 `工作簿全量.json`，Excel 由脚本写出；状态标签按组分文件并统一检查，公司行固定保留；新增搜索→投递中间区域（公司文件、投递批次、正向/反向评审）；新增“工作区配置与接线”组件。删除旧的 Excel 主记录、九张共享表、公司方案与 HTML 核对页代码栈。
 

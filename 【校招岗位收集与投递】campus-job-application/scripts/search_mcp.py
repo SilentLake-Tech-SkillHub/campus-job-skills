@@ -52,8 +52,20 @@ def recruiting_status_confirm(items:list[dict],user_quote:str,confirmation_ref:s
 
 @server.tool()
 def recruiting_rows_upsert(items:list[dict])->dict:
-    """按业务键增改主数据 JSON 的非状态字段（新岗位、JD、链接）；不能改投递状态。"""
+    """按业务键增改主数据 JSON 的非状态字段（新岗位、JD 等）；不能改投递状态，也不能更换已有岗位的链接（用 recruiting_link_change_preview/confirm）。"""
     return run_sync('upsert',items=items)
+
+
+@server.tool()
+def recruiting_link_change_preview(items:list[dict])->dict:
+    """只读：更换已有岗位链接前生成“岗位链接 X → Y”（items：[{sheet,company,link,title,new_link}]，link/title 为该行当前值）。必须原样展示给用户并取得明确确认。"""
+    return run_sync('relink','--preview',items=items)
+
+
+@server.tool()
+def recruiting_link_change_confirm(items:list[dict],user_quote:str)->dict:
+    """用户确认后更换已有岗位链接：投递状态不变、无需重新确认，确认记录与志愿顺序等投递数据随行迁移；不写 Excel。"""
+    return run_sync('relink','--quote',user_quote,items=items)
 
 
 @server.tool()

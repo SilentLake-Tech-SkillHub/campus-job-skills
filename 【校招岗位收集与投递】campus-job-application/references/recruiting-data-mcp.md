@@ -9,7 +9,9 @@
 | `recruiting_status_check` | `check` | 只读：标签、字段、名额表、未确认状态变更、JSON 与 Excel 差异 |
 | `recruiting_status_propose` | `propose` | 只读：生成“当前状态是X，更新状态是Y”（含名额收口行），必须原样给用户看 |
 | `recruiting_status_confirm` | `confirm` | 用户明确确认后执行，记用户原话到确认台账并改主数据 |
-| `recruiting_rows_upsert` | `upsert` | 新增岗位行或改非状态字段；整行过字段门禁（岗位名称不得含“志愿”等） |
+| `recruiting_rows_upsert` | `upsert` | 新增岗位行或改非状态字段；整行过字段门禁（岗位名称不得含“志愿”等）；不能更换已有岗位的链接 |
+| `recruiting_link_change_preview` | `relink --preview` | 只读：更换已有岗位链接前生成“岗位链接 X → Y”，必须原样给用户看 |
+| `recruiting_link_change_confirm` | `relink --quote` | 用户确认后换链接：状态不变、无需重新确认，确认记录、志愿顺序等投递数据随行迁移；岗位在已交接批次中时拒绝 |
 | `recruiting_json_write_excel` | `write` | 唯一写 Excel 的入口，写后逐格读回 |
 | `recruiting_sync_pending` | `pending` / `diff` | 是否有未写入 Excel 的改动及逐格差异 |
 | `recruiting_write_defer` | `defer` | 用户选择“下一轮再写入”时登记原话 |

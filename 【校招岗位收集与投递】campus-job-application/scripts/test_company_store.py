@@ -92,6 +92,30 @@ class CompanyStoreTests(unittest.TestCase):
         f.write_text(json.dumps([{"sheet": "中国大陆", "company": "甲公司", "title": t, "顺序": n} for t, n in pairs], ensure_ascii=False), encoding='utf-8')
         return self.run_cmd('set-order', '--input', str(f), '--quote', '游戏产品第一，AI第二', ok=False)
 
+    def sync(self, *args, ok=True):
+        p = subprocess.run([sys.executable, '-B', str(HERE / 'json_excel_sync.py'), '--workspace', str(self.root), '--labels', '产品管理/labels.json', *args],
+                           capture_output=True, text=True, encoding='utf-8')
+        if ok and p.returncode:
+            self.fail(p.stderr + p.stdout)
+        return p
+
+    def test_relink_keeps_user_order_and_is_blocked_after_handoff(self):
+        """换链接后 refresh 保留用户给的志愿顺序；岗位在待评审批次里提示须重新 forward；批次已交接后拒绝换链接。"""
+        self.run_cmd('refresh')
+        self.assertEqual(self.set_order(('游戏产品', 1), ('AI产品经理', 2)).returncode, 0)
+        f = self.root / 'relink.json'
+        old, new, newer = ('https://game.jia.example.cn/job/778899', 'https://game.jia.example.cn/job/778900', 'https://game.jia.example.cn/job/778901')
+        f.write_text(json.dumps([{"sheet": "中国大陆", "company": "甲公司", "link": old, "title": "游戏产品", "new_link": new}], ensure_ascii=False), encoding='utf-8')
+        self.sync('relink', '--input', str(f), '--quote', '游戏产品换官网新链接')
+        self.run_cmd('refresh')
+        jia = json.loads((self.root / '岗位交接/公司/中国大陆/甲公司/公司.json').read_text(encoding='utf-8'))
+        self.assertEqual([(r['岗位ID'], r.get('顺序')) for r in jia['roles']], [('123456', 2), ('778900', 1)])
+        self.assertEqual(self.run_cmd('forward')['roles'], 2)
+        f.write_text(json.dumps([{"sheet": "中国大陆", "company": "甲公司", "link": new, "title": "游戏产品", "new_link": newer}], ensure_ascii=False), encoding='utf-8')
+        self.assertIn('须重新生成批次', self.sync('relink', '--input', str(f), '--preview').stdout)
+        self.run_cmd('forward-confirm', '--quote', '确认交接')
+        self.assertIn('已交接', self.sync('relink', '--input', str(f), '--quote', 'x', ok=False).stderr)
+
     def test_forward_requires_user_given_order_within_each_group(self):
         self.run_cmd('refresh')
         out = self.run_cmd('forward')
