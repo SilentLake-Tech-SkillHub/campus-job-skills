@@ -451,6 +451,34 @@ class SyncTests(unittest.TestCase):
         self.assertEqual([(ws.cell(r, 9).value, ws.cell(r, 10).value) for r in (3, 4)],
                          [('https://a.example/0-v3', '岗位待筛选'), ('https://a.example/1-new', '岗位待投递')])
 
+    def test_link_exception_note_only_by_command(self):
+        """链接例外备注只能由 link-exception 写：upsert 写或改都拒绝；预览不改文件；确认后记入台账；可撤销；绕过脚本写入的被门禁拦下。"""
+        self.migrate()
+        self.run_cmd('write')
+        key0 = {k: v for k, v in self.role(0, '').items() if k != 'to'}
+        p = self.run_cmd('upsert', '--input', self.items([{"key": key0, "values": {"备注": S.LINK_EXCEPTION_PREFIX + '列表页按ID定位'}}]), ok=False)
+        self.assertIn('link-exception', p.stderr)
+        item = {**key0, "定位说明": "列表页按 positionId 定位，点岗位名展开 JD"}
+        before = (self.root / '岗位交接/工作簿全量.json').read_bytes()
+        out = json.loads(self.run_cmd('link-exception', '--input', self.items([item]), '--preview').stdout)
+        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0：备注「空」→「用户例外保留：官网无独立详情页。列表页按 positionId 定位，点岗位名展开 JD」'
+                                                    '（生成投递批次时不检查该岗位链接是否为具体岗位页）'])
+        self.assertEqual(before, (self.root / '岗位交接/工作簿全量.json').read_bytes())
+        self.run_cmd('link-exception', '--input', self.items([item]), '--quote', '这种可以')
+        p = self.run_cmd('upsert', '--input', self.items([{"key": key0, "values": {"备注": "用户例外保留：别的原因写这里"}}]), ok=False)
+        self.assertIn('link-exception', p.stderr)
+        self.run_cmd('write')
+        ws = load_workbook(self.root / 'book.xlsx')['中国大陆']
+        self.assertEqual(ws.cell(3, 11).value, S.LINK_EXCEPTION_PREFIX + '列表页按 positionId 定位，点岗位名展开 JD')
+        self.run_cmd('link-exception', '--input', self.items([{**key0, "撤销": True}]), '--quote', '撤销')
+        self.run_cmd('write')
+        self.assertIsNone(load_workbook(self.root / 'book.xlsx')['中国大陆'].cell(3, 11).value)
+        master = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
+        row = next(r for r in master['sheets'][0]['rows'] if r['row'] == 4)
+        S.set_cell(row, 11, S.LINK_EXCEPTION_PREFIX + '绕过脚本直接写')  # 绕过脚本直接改 JSON
+        (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(master, ensure_ascii=False), encoding='utf-8')
+        self.assertIn('没有用户确认记录', self.run_cmd('write', ok=False).stderr)
+
     def test_company_labels_live_in_own_group_file(self):
         """公司状态标签单独成组（一组一个文件）：岗位行只能用岗位组、公司行只能用公司组；跨组重名、组文件缺失都拒绝加载。"""
         p = self.run_cmd('propose', '--input', self.items([self.role(0, '已有岗位')]), ok=False)

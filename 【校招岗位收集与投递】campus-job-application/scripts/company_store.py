@@ -37,6 +37,7 @@ import json_excel_sync as S  # noqa: E402
 UNSAFE = re.compile(r'[\\/:*?"<>|]')
 STAGES_OK_FOR_NEW_BATCH = {None, '空闲', '已回写', '等待正向评审'}
 KEEP_ROLE_FIELDS = ('投递链接', '顺序', '城市选项')
+LIST_PAGE_PROBLEM = '岗位链接是岗位列表页，不是具体岗位页'
 LIST_PAGE = re.compile(r'(^|/)(position|job|jobs|post)s?/list(/|$)|list\.html$|/campus-recruit-list', re.I)
 
 
@@ -122,7 +123,7 @@ class Store:
         if self.is_third_party(link):
             out.append(f'岗位链接指向第三方招聘网站（{p.netloc}），需换成官网链接')
         if LIST_PAGE.search(p.path + ('#' + p.fragment if p.fragment else '')):
-            out.append('岗位链接是岗位列表页，不是具体岗位页')
+            out.append(LIST_PAGE_PROBLEM)
         if not rid:
             out.append('岗位链接里没有官方岗位ID（首页或列表页），不是具体岗位页')
         if dup:
@@ -267,6 +268,7 @@ class Store:
         master = self.ctx.load_master()
         rows = self.master_rows(master)
         companies, excluded = [], []
+        ledger = self.ctx.ledger()
         for (sheet, name), rs in sorted(rows.items(), key=lambda x: (x[0][0], str(x[0][1]))):
             pending = [r for r in rs if r['kind'] == 'role' and r['values'].get(self.ctx.column) == '岗位待投递']
             if not pending:
@@ -284,12 +286,19 @@ class Store:
                 link = r['values'].get(S.LINK_COL)
                 rid = self.role_id(link)
                 problems = self.link_problems(link, rid, links[str(link or '').rstrip('/')] > 1)
+                note, confirmed = S.link_exception_note(self.ctx, ledger, sheet, r['row'], r['idx'])
+                if note and not confirmed:
+                    problems.append('备注是链接例外，但没有用户确认记录，须用 link-exception 登记')
+                elif note:  # 用户确认的链接例外：官网无独立详情页，只免“列表页”检查
+                    problems = [x for x in problems if x != LIST_PAGE_PROBLEM]
                 if problems:
                     excluded.append({'公司': name, '地区': sheet, '岗位': r['values'].get(S.NAME_COL), '原因': '；'.join(problems)})
                     continue
                 stored = by_key.get(kid(r['key']), {})
                 item = {'岗位ID': rid, '岗位名称': r['values'].get(S.NAME_COL), '岗位链接': link,
                         'BU': stored.get('BU') or r['values'].get('所属BU') or '未披露', '志愿分组': stored.get('志愿分组') or '公司'}
+                if note:
+                    item['链接说明'] = note[len(S.LINK_EXCEPTION_PREFIX):]
                 if stored.get('顺序') not in (None, ''):
                     item['顺序'] = stored['顺序']
                 ok.append(item)
@@ -315,7 +324,7 @@ class Store:
     def review(self, batch):
         rows = ''.join(
             f"<tr><td>{html.escape(c['地区'])}</td><td>{html.escape(c['公司'])}</td><td>{html.escape(c['stage'])}</td>"
-            f"<td>{'<br>'.join(html.escape(('' if r['志愿分组'] == '公司' else r['志愿分组'] + '｜') + ('第' + str(r['顺序']) + '志愿｜' if r.get('顺序') else '') + str(r['岗位名称'])) for r in c['岗位'])}</td></tr>" for c in batch['companies'])
+            f"<td>{'<br>'.join(html.escape(('' if r['志愿分组'] == '公司' else r['志愿分组'] + '｜') + ('第' + str(r['顺序']) + '志愿｜' if r.get('顺序') else '') + str(r['岗位名称']) + ('（链接例外：' + str(r['链接说明']) + '）' if r.get('链接说明') else '')) for r in c['岗位'])}</td></tr>" for c in batch['companies'])
         ex = ''.join(f"<tr><td>{html.escape(e['地区'])}</td><td>{html.escape(str(e['公司']))}</td><td>{html.escape(str(e.get('岗位', '')))}</td>"
                      f"<td>{html.escape(e['原因'])}</td></tr>" for e in batch['excluded'])
         page = f"""<!doctype html><html lang=zh><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>正向评审</title>

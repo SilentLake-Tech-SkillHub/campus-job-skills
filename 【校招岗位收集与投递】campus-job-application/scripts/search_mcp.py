@@ -57,6 +57,18 @@ def recruiting_rows_upsert(items:list[dict])->dict:
 
 
 @server.tool()
+def recruiting_link_exception_preview(items:list[dict])->dict:
+    """只读：登记或撤销链接例外（官网无独立详情页）前生成备注“当前 → 更新”（items：[{sheet,company,link,title,定位说明}]，撤销给 "撤销": true）。必须原样展示给用户并取得明确确认。"""
+    return run_sync('link-exception','--preview',items=items)
+
+
+@server.tool()
+def recruiting_link_exception_confirm(items:list[dict],user_quote:str)->dict:
+    """用户确认后写入固定格式的链接例外备注并记入台账；forward 据此不检查该岗位链接是否为具体岗位页。不写 Excel。"""
+    return run_sync('link-exception','--quote',user_quote,items=items)
+
+
+@server.tool()
 def recruiting_link_change_preview(items:list[dict])->dict:
     """只读：更换已有岗位链接前生成“岗位链接 X → Y”（items：[{sheet,company,link,title,new_link}]，link/title 为该行当前值）。必须原样展示给用户并取得明确确认。"""
     return run_sync('relink','--preview',items=items)

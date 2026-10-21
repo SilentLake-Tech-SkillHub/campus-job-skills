@@ -116,6 +116,28 @@ class CompanyStoreTests(unittest.TestCase):
         self.run_cmd('forward-confirm', '--quote', '确认交接')
         self.assertIn('已交接', self.sync('relink', '--input', str(f), '--quote', 'x', ok=False).stderr)
 
+    def test_link_exception_lets_list_page_link_through_forward(self):
+        """列表页链接默认不交接；用户确认链接例外后交接，并带上定位说明。"""
+        self.run_cmd('refresh')
+        self.assertEqual(self.set_order(('游戏产品', 1), ('AI产品经理', 2)).returncode, 0)
+        old, lst = 'https://jia.jobs.example.cn/campus/position/123456/detail', 'https://jia.jobs.example.cn/campus-recruit-list.html?positionId=123456'
+        f = self.root / 'in.json'
+        f.write_text(json.dumps([{"sheet": "中国大陆", "company": "甲公司", "link": old, "title": "AI产品经理", "new_link": lst}], ensure_ascii=False), encoding='utf-8')
+        self.sync('relink', '--input', str(f), '--quote', '换成官网列表链接')
+        self.run_cmd('refresh')
+        self.run_cmd('forward')
+        b = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
+        self.assertEqual({(e['公司'], e.get('岗位')): e['原因'] for e in b['excluded']}[('甲公司', 'AI产品经理')], C.LIST_PAGE_PROBLEM)
+        f.write_text(json.dumps([{"sheet": "中国大陆", "company": "甲公司", "link": lst, "title": "AI产品经理",
+                                  "定位说明": "列表页按 positionId 定位，点岗位名展开 JD"}], ensure_ascii=False), encoding='utf-8')
+        self.sync('link-exception', '--input', str(f), '--quote', '官网没有详情页，这个可以')
+        self.run_cmd('forward')
+        b = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
+        jia = next(c for c in b['companies'] if c['公司'] == '甲公司')
+        self.assertEqual([(r['岗位名称'], r['岗位ID'], r.get('链接说明')) for r in jia['岗位']],
+                         [('游戏产品', '778899', None), ('AI产品经理', '123456', '列表页按 positionId 定位，点岗位名展开 JD')])
+        self.assertIn('链接例外：列表页按 positionId 定位', (self.root / '岗位交接/正向评审.html').read_text(encoding='utf-8'))
+
     def test_forward_requires_user_given_order_within_each_group(self):
         self.run_cmd('refresh')
         out = self.run_cmd('forward')

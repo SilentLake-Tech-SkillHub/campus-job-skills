@@ -11,6 +11,7 @@
   confirm   用户明确确认后，把变更逐行记入确认台账并更新主数据 JSON（不写 Excel）
   report    只读：一家或多家公司的汇报（主链接、计划、管培/产培、岗位按状态、名额与占用）
   upsert    按业务键增改主数据 JSON 的非状态字段（新岗位、JD 等）；不能改投递状态，也不能更换已有岗位的链接
+  link-exception  登记/撤销“官网无独立详情页”的链接例外：备注只能由本命令写成固定格式，用户确认后执行；forward 据此不检查该岗位链接是否为具体岗位页
   relink    更换已有岗位的链接：--preview 生成“岗位链接 X → Y”给用户看，确认后带 --quote 执行；状态不变、无需重新确认，志愿顺序等投递数据随行迁移
   write     JSON→Excel：标签门禁→状态确认门禁→写出→下拉校验→逐格读回→回写绑定（不做快照，主数据只留一份“上一版”）
   defer     用户选择“下一轮再写入”时登记延后（绑定当前 JSON 数据摘要）
@@ -37,6 +38,10 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 NAME_COL, LINK_COL, COMPANY_COL = '岗位名称', '岗位链接', '公司'
 COMPANY_INFO_COLS = ('地区', COMPANY_COL, '主要行业', '企业性质')
+NOTE_COL = '备注'
+# 链接例外：官网没有独立的岗位详情页时，备注写成这个固定开头 + 定位说明，forward 不再检查该岗位链接是否为具体岗位页。
+# 这种备注只能由 link-exception 命令写入（用户确认、记入台账），upsert 不能写或改。
+LINK_EXCEPTION_PREFIX = '用户例外保留：官网无独立详情页。'
 ROW_KINDS = {'role': '岗位行', 'company': '公司行'}
 
 
@@ -276,6 +281,32 @@ def validate_labels(ctx, master):
     for (name, company), n in company_rows.items():
         if not n:
             problems.append(f'{name}｜{company} 缺少公司行（每家公司在每张地区表固定一行公司行，有没有岗位都保留）')
+    return problems
+
+
+def link_exception_note(ctx, ledger, sheet_name, row, idx):
+    """该岗位行是否为已确认的链接例外：备注是固定开头，且台账里有用户对这条备注的确认记录。返回 (备注, 是否已确认)。"""
+    note = str(cell_value(row, idx[NOTE_COL]) or '') if NOTE_COL in idx else ''
+    if not note.startswith(LINK_EXCEPTION_PREFIX):
+        return None, False
+    k = row_key(sheet_name, row, idx)
+    for e in ledger.get('link_exceptions', []):
+        ek = e.get('key') or {}
+        same = ek.get('sheet') == k['sheet'] and ek.get('company') == k['company'] and (
+            ek.get('link') == k['link'] if k.get('link') else ek.get('title') == k.get('title'))
+        if same and e.get('note') == note:
+            return note, True
+    return note, False
+
+
+def validate_link_exceptions(ctx, master):
+    ledger, problems = ctx.ledger(), []
+    for name, s, idx, row in iter_status_rows(ctx, master):
+        if row_kind(row, idx) != 'role':
+            continue
+        note, ok = link_exception_note(ctx, ledger, name, row, idx)
+        if note and not ok:
+            problems.append(f'{name}!{row["row"]} {cell_value(row, idx[COMPANY_COL])} 备注是链接例外，但没有用户确认记录（或确认后被改动），须用 link-exception 登记')
     return problems
 
 
@@ -573,7 +604,7 @@ def apply_validation(ws, column_index, labels, max_row):
 
 def write(ctx):
     master = ctx.load_master()
-    problems = validate_labels(ctx, master) + validate_fields(ctx, master) + validate_quota(master)
+    problems = validate_labels(ctx, master) + validate_fields(ctx, master) + validate_quota(master) + validate_link_exceptions(ctx, master)
     if problems:
         raise SystemExit('标签/字段门禁拒绝写入（共 %d 处）：\n' % len(problems) + '\n'.join(problems[:50]))
     changes = status_changes(ctx, master)
@@ -984,6 +1015,11 @@ def upsert(ctx, items):
                 if v and col in idx:
                     set_cell(row, idx[col], v)
         for col, v in fields.items():
+            if col == NOTE_COL and NOTE_COL in idx:
+                cur_note = str(cell_value(row, idx[NOTE_COL]) or '')
+                if (str(v or '').startswith(LINK_EXCEPTION_PREFIX) or cur_note.startswith(LINK_EXCEPTION_PREFIX)) and str(v or '') != cur_note:
+                    raise SystemExit(f'upsert 不能写入或修改链接例外备注：{describe(key)}。“{LINK_EXCEPTION_PREFIX}”开头的备注只能用 '
+                                     'link-exception（先 --preview 给用户看，确认后带 --quote 执行）')
             if (col == LINK_COL and hits and v not in (None, '')
                     and str(v) != str(cell_value(row, idx[LINK_COL]) or '')):
                 raise SystemExit(f'upsert 不能更换已有岗位的链接：{describe(key)}。岗位链接是行身份的一部分，'
@@ -1053,6 +1089,59 @@ def ensure_company_row(s, idx, company):
 HANDED_OFF = ('已交接', '进行中')
 
 
+def link_exception(ctx, items, quote, preview=False):
+    """登记或撤销链接例外（官网没有独立的岗位详情页）。备注写成固定格式「用户例外保留：官网无独立详情页。<定位说明>」，
+    forward 据此不检查该岗位链接是否为具体岗位页（仍须 https 官网、带官方岗位ID、不与同公司其它岗位共用）。
+    preview 只返回给用户看的逐行变更；用户确认后带原话执行，确认记入台账（每行只留最新一条）。
+    items：[{sheet,company,link,title,定位说明}]；撤销时给 "撤销": true。"""
+    if not preview and (not quote or not quote.strip()):
+        raise SystemExit('必须提供用户确认原话')
+    master = ctx.load_master()
+    plan, lines = [], []
+    for d in items:
+        key = normalize_key({k: d.get(k) for k in ('sheet', 'company', 'link', 'title')})
+        if key.get('placeholder'):
+            raise SystemExit(f'{describe(key)} 是公司行，不能登记链接例外')
+        s, idx, row = find_row(ctx, master, key)
+        if NOTE_COL not in idx:
+            raise SystemExit(f"{s['name']} 没有“{NOTE_COL}”列")
+        cur = str(cell_value(row, idx[NOTE_COL]) or '')
+        if d.get('撤销'):
+            if not cur.startswith(LINK_EXCEPTION_PREFIX):
+                raise SystemExit(f'{describe(key)} 当前备注不是链接例外，无需撤销')
+            new, effect = None, '生成投递批次时恢复检查该岗位链接是否为具体岗位页'
+        else:
+            how = str(d.get('定位说明') or '').strip()
+            if len(how) < 4:
+                raise SystemExit(f'{describe(key)} 须写明定位说明：官网上如何找到这个岗位（如“列表页按 positionId 定位，点岗位名展开 JD”）')
+            if cur and not cur.startswith(LINK_EXCEPTION_PREFIX):
+                raise SystemExit(f'{describe(key)} 已有其它用途的备注「{cur}」，备注只能放一条，请先与用户确认保留哪一条')
+            new, effect = LINK_EXCEPTION_PREFIX + how, '生成投递批次时不检查该岗位链接是否为具体岗位页'
+            err = check_field(ctx, NOTE_COL, new, 'role')
+            if err:
+                raise SystemExit(f'字段门禁：{describe(key)} {err}')
+        line = f"{describe(key)}：备注「{cur or '空'}」→「{new or '空'}」（{effect}）"
+        plan.append((s, idx, row, key, new, line))
+        lines.append(line)
+    if preview:
+        return {'show_user_exactly': lines,
+                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行'}
+    ledger = ctx.ledger()
+    records = ledger.setdefault('link_exceptions', [])
+    at = now()
+    for s, idx, row, key, new, line in plan:
+        set_cell(row, idx[NOTE_COL], new)
+        records[:] = [e for e in records if key_id(e['key']) != key_id(key)]
+        if new:
+            records.append({'id': uuid.uuid4().hex, 'key': key, 'note': new, 'shown_to_user': line,
+                            'user_quote': quote.strip(), 'confirmed_at': at})
+    refresh_digest(master)
+    save_master(ctx, master)
+    save_json(ctx.ledger_path, ledger)
+    return {'link_exceptions': len(plan), 'excel_written': False,
+            'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
+
+
 def relink(ctx, items, quote, preview=False):
     """更换已有岗位行的岗位链接。岗位链接是行身份的一部分，所以换链接不走 upsert：
     preview 只返回给用户看的逐行“岗位链接 X → Y”，不改任何文件；用户确认后带原话执行——
@@ -1111,7 +1200,7 @@ def relink(ctx, items, quote, preview=False):
         cell = next(c for c in row['cells'] if c['column'] == idx[LINK_COL])
         cell['hyperlink'] = {'target': new, 'location': None}
         ok, nk = key_id(old_key), key_id(new_key)
-        for e in ledger['entries']:
+        for e in ledger['entries'] + ledger.get('link_exceptions', []):
             if key_id(e['key']) == ok:
                 e['key'] = new_key
         prior = next((c for c in changes if not c.get('applied_at') and key_id(c['new_key']) == ok), None)
@@ -1223,6 +1312,8 @@ def reset_rows(ctx, items, quote, preview=False, master=None, drop_companies=(),
         qs['max_row'] = len(qs['rows'])
     ledger = ctx.ledger()
     ledger['entries'] = [e for e in ledger['entries'] if key_id(e['key']) not in deleted_keys]  # 行已删除，旧确认不再保留
+    if 'link_exceptions' in ledger:
+        ledger['link_exceptions'] = [e for e in ledger['link_exceptions'] if key_id(e['key']) not in deleted_keys]
     at = now()
     for _, ph, key in placeholders:
         if ph is None:
@@ -1416,6 +1507,10 @@ def main():
     p.add_argument('--preview', action='store_true')
     p.add_argument('--drop-company', action='append', default=[], help='岗位删光后连同公司行整家删除的公司（可多次）')
     p.add_argument('--mark-research', action='store_true', help='公司仍有其它岗位时也把公司行改回“待搜索”，标明需重新搜索')
+    p = sub.add_parser('link-exception')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link,title,定位说明}]，撤销时给 "撤销": true')
+    p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
+    p.add_argument('--preview', action='store_true')
     p = sub.add_parser('relink')
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link,title,new_link}]，link/title 为该行当前值')
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
@@ -1445,7 +1540,7 @@ def main():
     if a.cmd == 'check':
         m = ctx.load_master()
         probs = validate_labels(ctx, m)
-        fprobs = validate_fields(ctx, m) + validate_quota(m)
+        fprobs = validate_fields(ctx, m) + validate_quota(m) + validate_link_exceptions(ctx, m)
         changed, extra = diff_counts(ctx, m)
         ch = status_changes(ctx, m)
         miss = unconfirmed(ctx, ch)
@@ -1500,6 +1595,12 @@ def main():
         else:
             with exclusive(ctx):
                 out = reset_rows(ctx, read(a.input), a.quote, drop_companies=a.drop_company, mark_research=a.mark_research)
+    elif a.cmd == 'link-exception':
+        if a.preview:
+            out = link_exception(ctx, read(a.input), a.quote, preview=True)
+        else:
+            with exclusive(ctx):
+                out = link_exception(ctx, read(a.input), a.quote)
     elif a.cmd == 'relink':
         if a.preview:
             out = relink(ctx, read(a.input), a.quote, preview=True)
