@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -61,7 +62,8 @@ class CompanyStoreTests(unittest.TestCase):
 
     def run_cmd(self, *args, ok=True):
         p = subprocess.run([sys.executable, '-B', str(SCRIPT), '--workspace', str(self.root), '--labels', '产品管理/labels.json', *args],
-                           capture_output=True, text=True, encoding='utf-8')
+                           capture_output=True, text=True, encoding='utf-8',
+                           env={**os.environ, 'CODEX_THREAD_ID': 'test-session', 'CODEX_TURN_ID': 'test-turn', 'DSH_SESSION_ID': ''})
         if ok and p.returncode:
             self.fail(p.stderr + p.stdout)
         return json.loads(p.stdout) if p.stdout.strip() and ok else p
@@ -74,6 +76,37 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual(C.Store.role_id('https://hr.4399om.com/main/?r=UserCenter/addValidate&jobID=JO20260728001'), 'JO20260728001')
         self.assertEqual(C.Store.role_id('https://maker.haier.net/client/campus/deliverfirst/id/60/fid/23/rid/392.html'), '392')
         self.assertEqual(C.Store.role_id('https://www.lixiang.com/employ/detail/19719.html?jobCode=A98366'), 'A98366')
+
+    def test_explicit_requirements_keep_both_roles_and_clear_only_after_batch(self):
+        import application_requirements as R
+        self.run_cmd('refresh')
+        self.assertEqual(self.set_order(('游戏产品', 1), ('AI产品经理', 2)).returncode, 0)
+        req = R.Requirements(self.root, 'test-session', 'test-turn')
+        req.set({'公司': ['甲公司'], '浏览器': 'iab'}, '只做甲公司，两个岗位都要，只用内置浏览器')
+        original = (self.root / '岗位交接/工作簿全量.json').read_bytes()
+        out = self.run_cmd('forward')
+        self.assertEqual((out['companies'], out['roles'], out['excluded']), (1, 2, 0))
+        self.assertTrue(out['requirementsCleared'])
+        batch = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
+        self.assertEqual([c['公司'] for c in batch['companies']], ['甲公司'])
+        self.assertEqual(batch['execution']['browserChannels'], ['iab'])
+        self.assertEqual([r['顺序'] for r in batch['companies'][0]['岗位']], [1, 2])
+        self.assertEqual(json.loads(req.temp.read_text(encoding='utf-8')), {})
+        self.assertEqual((self.root / '岗位交接/工作簿全量.json').read_bytes(), original)
+
+    def test_invalid_explicit_company_does_not_consume_or_replace_batch(self):
+        import application_requirements as R
+        self.run_cmd('refresh')
+        self.run_cmd('forward')
+        batch = self.root / '岗位交接/投递批次.json'
+        before = batch.read_bytes()
+        req = R.Requirements(self.root, 'test-session', 'test-turn')
+        req.set({'公司': ['不存在的公司']}, '只做指定公司')
+        result = self.run_cmd('forward', ok=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('指定公司没有待投递岗位', result.stderr)
+        self.assertEqual(batch.read_bytes(), before)
+        self.assertEqual(json.loads(req.temp.read_text(encoding='utf-8'))['requirements']['公司'], ['不存在的公司'])
 
     def test_refresh_overwrites_and_keeps_only_runtime_fields(self):
         out = self.run_cmd('refresh')

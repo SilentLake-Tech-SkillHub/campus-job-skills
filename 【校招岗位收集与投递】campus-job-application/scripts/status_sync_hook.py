@@ -67,7 +67,8 @@ def protected(cfg):
     batch = (cfg.get('companyStore') or {}).get('batchFile', '岗位交接/投递批次.json')
     # 投递批次只由 company_store.py 写；投递回传只由投递组件的 application_closeout 写
     return [cfg['workbook'], cfg['masterData'], cfg['confirmationLedger'], LABELS_FILE, *cfg.get('labelGroups', []),
-            batch, str(Path(batch).with_name('投递回传.json'))]
+            batch, str(Path(batch).with_name('投递回传.json')), '产品管理/user_applicaiton_requirements_temp.json',
+            '.runtime/user_application_requirements_state.json']
 
 
 def sync(root, *args):
@@ -218,7 +219,10 @@ def tool_violation(cfg, payload):
     if SHELL_TOOL.search(tool) and not EDIT_TOOL.search(tool) or isinstance(ti, dict) and 'command' in ti:
         hits = [f for f in files if f in raw or Path(f).name in raw]
         if hits and 'json_excel_sync.py' not in raw and SHELL_WRITE.search(raw):
-            return hits
+            if 'application_requirements.py' in raw:
+                hits = [f for f in hits if f not in ('产品管理/user_applicaiton_requirements_temp.json',
+                                                    '.runtime/user_application_requirements_state.json')]
+            return hits or None
         return None
     if EDIT_TOOL.search(tool):
         targets = write_targets(ti)

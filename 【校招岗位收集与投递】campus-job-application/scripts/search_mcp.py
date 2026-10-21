@@ -15,10 +15,50 @@ server=FastMCP(
         '用户求职目标与选岗规则只在工作区 产品管理/求职目标.json。'
         '选岗、去留、顺序由用户决定；不得因名额提前剔除任何符合要求的岗位，只展示符合要求的岗位和名额限制。'
         '任何投递状态变更先 recruiting_status_propose，把“当前状态是X，更新状态是Y”原样给用户看，用户确认后才 recruiting_status_confirm。'
+        '处理投递需求先 recruiting_application_requirements_begin；有参数覆盖写入一次性需求表，无公司参数默认最新十家。'
+        'recruiting_application_forward 从表取数，成功组批后立即清空；同回合默认不重复询问，新回合重新初始化。'
     )
 )
 
 SYNC_SCRIPT=os.path.join(os.path.dirname(os.path.abspath(__file__)),'json_excel_sync.py')
+
+
+def run_requirements(script, args):
+    import subprocess
+    workspace=os.environ.get('CAMPUS_RECRUITING_WORKSPACE')
+    if not workspace:raise ValueError('需要配置CAMPUS_RECRUITING_WORKSPACE')
+    cmd=[sys.executable,'-B',os.path.join(os.path.dirname(os.path.abspath(__file__)),script),
+         '--workspace',workspace,*args]
+    p=subprocess.run(cmd,capture_output=True,text=True,encoding='utf-8')
+    if p.returncode:raise ValueError((p.stderr or p.stdout).strip())
+    return json.loads(p.stdout)
+
+
+@server.tool()
+def recruiting_application_requirements_begin(session_id:str|None=None,turn_id:str|None=None)->dict:
+    """搜索组件启动：读取本回合需求入口；同回合默认模式不重复询问，新回合重新初始化。"""
+    args=[]
+    if session_id:args+=['--session',session_id]
+    if turn_id:args+=['--turn',turn_id]
+    return run_requirements('application_requirements.py',args+['begin'])
+
+
+@server.tool()
+def recruiting_application_requirements_set(requirements:dict,user_quote:str,session_id:str|None=None,turn_id:str|None=None)->dict:
+    """覆盖写入本轮需求临时JSON（公司/地区/浏览器）；空对象表示用户选择默认，不改主表状态。"""
+    args=[]
+    if session_id:args+=['--session',session_id]
+    if turn_id:args+=['--turn',turn_id]
+    return run_requirements('application_requirements.py',args+['set','--requirements',json.dumps(requirements,ensure_ascii=False),'--quote',user_quote])
+
+
+@server.tool()
+def recruiting_application_forward(session_id:str|None=None,turn_id:str|None=None)->dict:
+    """读取一次性需求生成当前正向评审；无公司参数默认取最新十家。成功后清空需求表，失败保留，仍须用户确认正向评审。"""
+    args=[]
+    if session_id:args+=['--session',session_id]
+    if turn_id:args+=['--turn',turn_id]
+    return run_requirements('company_store.py',args+['forward'])
 
 
 def run_sync(*args, items=None):

@@ -4,6 +4,9 @@
 
 | MCP 工具 | 对应命令 | 作用 |
 |---|---|---|
+| `recruiting_application_requirements_begin` | `application_requirements.py begin` | 初始化并读取当前回合需求；同回合默认不重复问，新回合重新初始化 |
+| `recruiting_application_requirements_set` | `application_requirements.py set` | 覆盖本轮需求与用户原话；空对象选择默认路线 |
+| `recruiting_application_forward` | `company_store.py forward` | 从临时表组批；无公司参数默认最新10家；成功后清空需求表 |
 | `recruiting_data_query` | `query` | 只读：按公司或工作表分页读取主数据 |
 | `recruiting_company_report` | `report` | 只读：公司汇报——校招主链接、计划数与名称、管培/产培计划、岗位总数及按投递状态计数与列表、用户已选（计入名额）、投递名额与剩余 |
 | `recruiting_status_check` | `check` | 只读：标签、字段、名额表、未确认状态变更、JSON 与 Excel 差异 |

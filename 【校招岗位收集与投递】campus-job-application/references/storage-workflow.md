@@ -12,6 +12,7 @@
 | 投递组件运行数据（companyId、官网域名、官方岗位ID、志愿分组、用户给定的志愿顺序、城市选项） | `岗位交接/公司/<地区>/<公司>/公司.json` | `company_store.py refresh` 按主表覆盖重建；志愿顺序用 `set-order` 记录用户原话 |
 | 各站点登录配置、表单定义 | 同目录 `登录[@域名].json`、`表单定义[@域名].json` | 投递组件建档 |
 | 当前投递批次与正向评审页 | `岗位交接/投递批次.json`、`岗位交接/正向评审.html` | `company_store.py forward / forward-confirm` |
+| 本轮一次性投递需求 | `产品管理/user_applicaiton_requirements_temp.json` | `application_requirements.py set` 覆盖写入；forward成功后立即清空，完成时检查 |
 | 投递结果回传与反向评审页 | `岗位交接/投递回传.json`、`岗位交接/反向评审.html` | 投递组件 `application_closeout`；`company_store.py reverse / reverse-confirm` |
 | 状态变更确认 | `产品管理/投递状态变更确认.json`（每行只留最近一次） | 只由 `confirm` / `reset-rows` 写 |
 | 用户求职目标与选岗规则 | `产品管理/求职目标.json` | 纠正时直接改写对应条目 |
@@ -33,4 +34,4 @@
 
 ## 交接与回传
 
-见 [公司交接：正向评审与反向评审](company-review-handoff.md)。
+先按 [一次性需求入口](application-requirements.md) 初始化本回合、覆盖需求并由固定脚本取数；随后见 [公司交接：正向评审与反向评审](company-review-handoff.md)。

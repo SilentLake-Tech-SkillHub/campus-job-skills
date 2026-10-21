@@ -2,13 +2,14 @@
 name: campus-job-application
 description: Use for every campus-job company search in this project — work through the master JSON's 待搜索 queue (or companies the user names), verify official plans and in-scope roles, write results only through the fixed script, get user confirmation for every status change, and hand confirmed roles to the application component through forward review. It never fills or submits applications.
 metadata:
-  version: "2.0.0"
+  version: "2.1.0"
 ---
 
 # 校招岗位搜索与主表维护
 
 ## 开工前必读
 
+- [本轮一次性投递需求](references/application-requirements.md)：组件开始处理投递需求先 `begin`；有参数覆盖写临时表，空表走最新10家默认路线。成功组批后立即清空，新用户回合重新初始化。
 - `产品管理/求职配置.md`：运行配置（主数据位置、地区表、目标届别、公司池基线、搜索顺序、浏览器）。缺失时先问用户并按 [模板](references/profile-template.md) 建立。
 - `产品管理/求职目标.json`：用户求职目标与选岗规则的**唯一来源**（岗位顺位、排除红线、城市、用工类型、特殊通道、决策红线、在用简历）。每次会话开始按文件里的“每次会话开始”向用户复述并确认方向和岗位顺位；用户纠正时直接改写该文件对应条目，不另记日志。
 - [数据建设与固定流程](references/storage-workflow.md)：每类信息的唯一存放位置和写入命令。
@@ -58,7 +59,7 @@ metadata:
 
 ## 交给投递组件
 
-选岗由用户决定。用户确认“岗位待投递”后，按 [正向评审与反向评审](references/company-review-handoff.md) 生成投递批次和正向评审页，用户确认后才交给投递组件；投递结果经反向评审、用户确认后才写回主表。本 Skill 不填表、不上传简历、不提交申请。
+选岗由用户决定。用户确认“岗位待投递”后，按 [本轮需求入口](references/application-requirements.md) 从临时表取范围，再按 [正向评审与反向评审](references/company-review-handoff.md) 生成投递批次和正向评审页，用户确认后才交给投递组件；投递结果经反向评审、用户确认后才写回主表。本 Skill 不填表、不上传简历、不提交申请。
 
 ## 数据接口
 

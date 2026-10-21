@@ -261,7 +261,12 @@ class Store:
             return None
         return json.loads(self.batch_file.read_text(encoding='utf-8'))
 
-    def forward(self):
+    def forward(self, session=None, turn=None):
+        from application_requirements import Requirements
+        return Requirements(self.root, session, turn).build(self._forward)
+
+    def _forward(self, requirements):
+        from application_requirements import select_companies
         prior = self.batch()
         if prior and prior.get('state') not in STAGES_OK_FOR_NEW_BATCH:
             raise SystemExit(f"当前批次状态为「{prior.get('state')}」，只有 空闲/已回写 时才能生成新批次")
@@ -269,7 +274,8 @@ class Store:
         rows = self.master_rows(master)
         companies, excluded = [], []
         ledger = self.ctx.ledger()
-        for (sheet, name), rs in sorted(rows.items(), key=lambda x: (x[0][0], str(x[0][1]))):
+        for sheet, name in select_companies(rows, ledger, requirements):
+            rs = rows[(sheet, name)]
             pending = [r for r in rs if r['kind'] == 'role' and r['values'].get(self.ctx.column) == '岗位待投递']
             if not pending:
                 continue
@@ -315,6 +321,9 @@ class Store:
         batch = {'schemaVersion': 2, 'batchId': 'B' + datetime.now().strftime('%Y%m%d%H%M%S'),
                  'state': '等待正向评审', 'updatedAt': now(), 'masterDataSha256': master['data_sha256'],
                  'companies': companies, 'excluded': excluded, 'confirmation': None}
+        if requirements.get('浏览器'):
+            batch['execution'] = {'browserChannels': ['chrome', 'iab'] if requirements['浏览器'] == 'dual'
+                                  else [requirements['浏览器']]}
         S.save_json(self.batch_file, batch)
         self.review(batch)
         return {'batchId': batch['batchId'], 'companies': len(companies),
@@ -335,6 +344,8 @@ class Store:
 <h2>本批不交接（需先处理）</h2><table><tr><th>地区</th><th>公司</th><th>岗位</th><th>原因</th></tr>{ex}</table></html>"""
         self.review_file.parent.mkdir(parents=True, exist_ok=True)
         self.review_file.write_text(page, encoding='utf-8')
+        if self.review_file.read_text(encoding='utf-8') != page:
+            raise ValueError('正向评审写入后读回不一致')
 
     def reverse(self):
         """反向评审：读取投递回传，逐行给出“当前状态是X，更新状态是Y”，生成反向评审页；不改主表。"""
@@ -377,6 +388,9 @@ class Store:
             b['state'] = '已回写'
         b['updatedAt'] = now()
         S.save_json(self.batch_file, b)
+        if not left:
+            from application_requirements import Requirements
+            Requirements(self.root).complete(b['batchId'])
         return {'batchId': b['batchId'], 'state': b['state'], 'statusChanges': len(items), 'unresolved': sorted(left)}
 
     def forward_confirm(self, quote):
@@ -452,6 +466,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--workspace', default=os.environ.get('CAMPUS_RECRUITING_WORKSPACE', '.'))
     ap.add_argument('--labels', default=os.environ.get('CAMPUS_STATUS_LABELS', '产品管理/投递状态标签.json'))
+    ap.add_argument('--session', help='当前宿主会话身份，默认使用宿主环境')
+    ap.add_argument('--turn', help='当前宿主回合身份，默认读取需求Hook上下文')
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('refresh')
     sub.add_parser('forward')
@@ -472,7 +488,7 @@ def main():
             out = st.refresh()
     elif a.cmd == 'forward':
         with S.exclusive(st.ctx):
-            out = st.forward()
+            out = st.forward(a.session, a.turn)
     elif a.cmd == 'set-order':
         with S.exclusive(st.ctx):
             out = st.set_order(json.loads(Path(a.input).read_text(encoding='utf-8')), a.quote)
