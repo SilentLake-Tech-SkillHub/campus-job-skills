@@ -268,20 +268,20 @@ class CompanyStoreTests(unittest.TestCase):
         self.set_order(('AI产品经理', 1), ('游戏产品', 2))
         self.run_cmd('forward')
         self.run_cmd('forward-confirm', '--quote', '确认交接')
-        before = json.loads((self.root / '岗位交接/投递批次.json').read_text())
+        before = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
         self.outcome('jia|123456', 'submission_confirmed', 'AI产品经理', 'https://jia.jobs.example.cn/campus/position/123456/detail', '123456')
         self.run_cmd('reverse')
         got = self.run_cmd('reverse-confirm', '--quote', '确认这一条')
         self.assertEqual(got['state'], '进行中')
         self.assertEqual(got['remainingRoles'], 1)
-        after = json.loads((self.root / '岗位交接/投递批次.json').read_text())
+        after = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
         self.assertEqual(C.content_sha(after), C.content_sha(before))
         self.assertIsNone(C.verify_handoff(after))
         self.assertNotEqual(self.run_cmd('forward', ok=False).returncode, 0)
         # Repair the prior implementation's premature closed state without
         # changing selections, user authority, or already-written master values.
         after['state'] = '已回写'
-        (self.root / '岗位交接/投递批次.json').write_text(json.dumps(after))
+        (self.root / '岗位交接/投递批次.json').write_text(json.dumps(after), encoding='utf-8')
         got = self.run_cmd('reverse-confirm', '--quote', '确认这一条')
         self.assertEqual((got['state'], got['statusChanges']), ('进行中', 0))
         self.outcome('jia|778899', 'submission_confirmed', '游戏产品', 'https://game.jia.example.cn/job/778899', '778899')

@@ -104,7 +104,7 @@ def rules_text(cfg, root=None):
         if g.get('error'):
             lines.append('  ' + g['error'])
             continue
-        rel = os.path.relpath(g['path'], root) if root is not None and os.path.isabs(g['path']) else g['path']
+        rel = (os.path.relpath(g['path'], root) if root is not None and os.path.isabs(g['path']) else str(g['path'])).replace(os.sep, '/')
         lines.append(f"  {kinds.get(g['rowKind'], g['rowKind'])}只能用（{rel}）："
                      + '；'.join(f"「{l['value']}」={l.get('definition', '')}" for l in g['labels']))
     return ('【投递状态门禁（所有 Agent 必须遵守）】\n'
@@ -208,6 +208,7 @@ PATH_TOKEN = re.compile(r'[^\s\'"<>|;&()]*(?:岗位交接/|历史/|备份|快照
 
 def stack_violation(root, payload):
     """记录唯一门禁：同一信息只保留最新一版、覆盖更新；不得在工作区另存副本/历史/备份，岗位交接/ 只允许固定文件。"""
+    root = Path(root).resolve()
     tool, ti = call_parts(payload)
     if EDIT_TOOL.search(tool) and not (isinstance(ti, dict) and 'command' in ti):
         targets = write_targets(ti) or []
@@ -221,7 +222,7 @@ def stack_violation(root, payload):
     bad = []
     for t in targets:
         t = str(t).strip().strip('\'"')
-        if Path(t).is_absolute():
+        if Path(t).is_absolute() or t.startswith('/'):
             try:
                 r = Path(t).resolve().relative_to(root).as_posix()
             except ValueError:

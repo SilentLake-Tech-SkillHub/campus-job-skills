@@ -30,6 +30,9 @@ import io
 import json
 import os
 import sys
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8')
 import uuid
 from datetime import date, datetime, time, timezone
 from pathlib import Path
