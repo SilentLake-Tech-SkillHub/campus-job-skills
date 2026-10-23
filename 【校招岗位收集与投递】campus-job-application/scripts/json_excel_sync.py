@@ -20,7 +20,10 @@
 import argparse
 import re
 import contextlib
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 import copy
 import hashlib
 import io
@@ -162,20 +165,34 @@ def exclusive(ctx, timeout=60):
     """多个 Agent 并发时串行化“读-改-写”：同一工作区内同一时刻只允许一个写命令。"""
     import time as _t
     lock = ctx.labels_path.parent / '.json_excel_sync.lock'
-    with open(lock, 'a+') as f:
+    with open(lock, 'a+b') as f:
+        if fcntl is None and f.seek(0, 2) == 0:
+            f.write(b'\0')
+            f.flush()
         deadline = _t.time() + timeout
         while True:
             try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                _file_lock(f)
                 break
-            except BlockingIOError:
+            except OSError as error:
+                if error.errno not in (11, 13, 35):
+                    raise
                 if _t.time() > deadline:
                     raise SystemExit('另一个 Agent 正在写主数据，等待超时，请稍后重试')
                 _t.sleep(0.2)
         try:
             yield
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            _file_lock(f, unlock=True)
+
+
+def _file_lock(file, unlock=False):
+    if fcntl is not None:
+        fcntl.flock(file, fcntl.LOCK_UN if unlock else fcntl.LOCK_EX | fcntl.LOCK_NB)
+    else:
+        import msvcrt
+        file.seek(0)
+        msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK if unlock else msvcrt.LK_NBLCK, 1)
 
 
 # ---------- 主数据 JSON 的行视图 ----------
