@@ -30,7 +30,7 @@ metadata:
 - **第一轮**：按主表行序处理状态为“待搜索”的公司，或用户本批点名的公司；按 `求职目标.json` 的“集团公司规则”，集团已投递过的旗下公司不再单独搜索，“不再搜索的公司”直接跳过。已经搜过的公司（有岗位行、标为“公司无合适岗位”、或“校招计划”表有本届核查记录）不重开，即使有缺口。
 - **补查**：第一轮之后，只处理用户点名的公司和具体缺口。一句笼统的“继续”只推进第一轮，不授权补查。
 - 每个新批次开始前运行 [campus-job-preference-intake](../【校招批次范围确认】campus-job-preference-intake/SKILL.md)，确认本批公司范围、本批意图（信息收集 / 准备投递）、执行方式（一个 AI / 多个 AI）。求职目标里已有的长期规则不重复问。
-- 用户确认多个 AI 共同搜索时，加载 [campus-job-parallel-search](skills/campus-job-parallel-search/SKILL.md)；用户确认双浏览器并发时读 [搜索 MCP](references/search-mcp.md)。
+- 用户确认多个 AI 共同搜索时，加载 [campus-job-parallel-search](skills/campus-job-parallel-search/SKILL.md)；浏览器双开（`求职配置.md`「浏览器」的默认）时读 [搜索 MCP](references/search-mcp.md)。
 
 ## 每家公司的固定步骤
 
@@ -51,7 +51,7 @@ metadata:
 
 ## 浏览器
 
-开页前读 [浏览器与页面核验](references/browser-and-submission-gates.md) 和 [标签分组](references/chrome-window-grouping.md)。浏览器按 `求职配置.md` 的设定使用；切换浏览器先说明失败情况并取得用户确认。每个标签记录所属公司，不占用用户的页面和窗口。
+开页前读 [浏览器与页面核验](references/browser-and-submission-gates.md) 和 [标签分组](references/chrome-window-grouping.md)。浏览器选择、双开与降级只按 `产品管理/求职配置.md`「浏览器」执行。每个标签记录所属公司，不占用用户的页面和窗口。
 
 ## 进度汇报
 

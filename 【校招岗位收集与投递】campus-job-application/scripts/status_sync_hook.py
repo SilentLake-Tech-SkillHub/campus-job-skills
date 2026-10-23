@@ -80,6 +80,21 @@ def sync(root, *args):
         return {'error': (p.stderr or p.stdout).strip()[:300]}
 
 
+CONFIG_FILE = '产品管理/求职配置.md'
+
+
+def browser_rules(root):
+    """浏览器规则只有一个位置：求职配置.md 的「## 浏览器」一节，每轮原样注入，不在别处复述。"""
+    try:
+        text = (Path(root) / CONFIG_FILE).read_text(encoding='utf-8')
+    except OSError:
+        return f'\n【浏览器规则】读取 {CONFIG_FILE} 失败，开页前先读该文件「浏览器」一节。'
+    m = re.search(r'^## 浏览器[^\n]*\n(.*?)(?=^## |\Z)', text, re.M | re.S)
+    if not m or not m.group(1).strip():
+        return f'\n【浏览器规则】{CONFIG_FILE} 缺少「## 浏览器」一节，开页前先请用户补充。'
+    return f'\n【浏览器规则（唯一来源：{CONFIG_FILE}「浏览器」，开页、切换或降级前必须遵守）】\n' + m.group(1).strip()
+
+
 def rules_text(cfg, root=None):
     kinds = {'role': '岗位行', 'company': '公司行'}
     groups = label_groups(Path(root), cfg) if root is not None else [
@@ -148,6 +163,16 @@ def call_parts(payload):
     ti = payload.get('tool_input')
     if ti is None:
         ti = payload.get('toolInput') or payload.get('arguments') or call.get('arguments') or {}
+    # A standalone orchestration wrapper still has an exact patch target. Parse
+    # only one literal call; mixed scripts retain normal shell write protection.
+    code = ti if isinstance(ti, str) else next((ti[k] for k in ('code', 'input', 'source') if isinstance(ti.get(k), str)), '') if isinstance(ti, dict) else ''
+    if re.search(r'(?:^|[._])exec$', tool) and isinstance(code, str):
+        wrapped = re.fullmatch(r'\s*(?:(?:text|notify)\s*\(\s*)?await\s+tools\.apply_patch\(("(?:\\.|[^"\\])*")\)\s*\)?\s*;?\s*', code, re.S)
+        if wrapped:
+            try:
+                return 'apply_patch', json.loads(wrapped.group(1))
+            except (ValueError, TypeError):
+                pass
     return tool, ti
 
 
@@ -216,6 +241,9 @@ def tool_violation(cfg, payload):
     tool, ti = call_parts(payload)
     raw = json.dumps(ti, ensure_ascii=False)
     files = protected(cfg)
+    targets = write_targets(ti) if EDIT_TOOL.search(tool) else None
+    if targets is not None:
+        return [f for f in files if any(t == f or t.endswith('/' + f) or Path(t).name == Path(f).name for t in targets)] or None
     if SHELL_TOOL.search(tool) and not EDIT_TOOL.search(tool) or isinstance(ti, dict) and 'command' in ti:
         hits = [f for f in files if f in raw or Path(f).name in raw]
         if hits and 'json_excel_sync.py' not in raw and SHELL_WRITE.search(raw):
@@ -445,8 +473,9 @@ def main():
         payload = {}
     event = a.event or payload.get('hook_event_name') or ''
     note = record_approval(root, payload) if event == 'UserPromptSubmit' else ''
-    if event in ('SessionStart', 'UserPromptSubmit', 'SubagentStart', 'PreInvocation', 'Stop', 'SubagentStop') \
-            and not sync_reminders_enabled(root, payload):
+    # 用户只关闭“写入 Excel 提醒”：该会话不再提示和拦截写入，但门禁规则、浏览器规则照常注入。
+    reminders = sync_reminders_enabled(root, payload)
+    if event in ('Stop', 'SubagentStop') and not reminders:
         emit({})
         return 0
     cfg = load_cfg(root)
@@ -454,8 +483,8 @@ def main():
         emit({})
         return 0
     if event in ('SessionStart', 'UserPromptSubmit', 'SubagentStart', 'PreInvocation'):
-        extra, _ = pending_text(root)
-        ctx = rules_text(cfg, root) + note + extra
+        extra = pending_text(root)[0] if reminders else ''
+        ctx = rules_text(cfg, root) + browser_rules(root) + note + extra
         if a.host == 'agy':
             emit({'injectSteps': [{'ephemeralMessage': ctx}]})
         else:

@@ -88,7 +88,8 @@ class HandoffChainTests(unittest.TestCase):
 
     def py(self, script, *args):
         p = subprocess.run([sys.executable, '-B', str(script), '--workspace', str(self.root), '--labels', '产品管理/labels.json', *args],
-                           capture_output=True, text=True, encoding='utf-8')
+                           capture_output=True, text=True, encoding='utf-8',
+                           env={**os.environ, 'CODEX_THREAD_ID': 'chain-session', 'CODEX_TURN_ID': 'chain-turn', 'DSH_SESSION_ID': ''})
         if p.returncode:
             self.fail(p.stderr + p.stdout)
         return json.loads(p.stdout) if p.stdout.strip() else None
@@ -109,6 +110,12 @@ class HandoffChainTests(unittest.TestCase):
 
     def test_full_chain(self):
         self.py(STORE, 'refresh')
+        # 投递组件此前进入过申请页并写回的申请页链接：refresh 保留，正向批次带上，投递组件读取后直接从申请页进入
+        cf = self.root / '岗位交接/公司/中国大陆/甲公司/公司.json'
+        doc = json.loads(cf.read_text(encoding='utf-8'))
+        doc['roles'][0]['投递链接'] = 'https://jia.jobs.example.cn/campus/apply/123456'
+        cf.write_text(json.dumps(doc, ensure_ascii=False), encoding='utf-8')
+        self.py(STORE, 'refresh')
         self.assertEqual(self.py(STORE, 'forward')['roles'], 0)  # 同组两个岗位，用户未给志愿顺序不交接
         order = self.root / 'order.json'
         order.write_text(json.dumps([{"sheet": "中国大陆", "company": "甲公司", "link": A_URL, "顺序": 1},
@@ -126,6 +133,7 @@ class HandoffChainTests(unittest.TestCase):
         out = self.v2([['AI产品经理', 'submission_confirmed', 'official_receipt_confirmed'],
                        ['数据产品经理', 'role_closed', 'official_role_closed']])
         self.assertEqual([r['title'] for r in out['input']['companies'][0]['roles']], ['AI产品经理', '数据产品经理'])
+        self.assertEqual(out['input']['companies'][0]['roles'][0].get('applyUrl'), 'https://jia.jobs.example.cn/campus/apply/123456')
         self.assertEqual({r['status'] for r in out['results']}, {'closed'})
         self.assertEqual(self.status(), {'AI产品经理': '岗位待投递', '数据产品经理': '岗位待投递'})  # 投递组件不改主表
 

@@ -187,6 +187,15 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual([(r['岗位名称'], r['顺序'], r['志愿分组']) for r in b['companies'][0]['岗位']],
                          [('游戏产品', 1, '公司'), ('AI产品经理', 2, '公司')])
 
+    def test_application_url_written_back_by_v2_survives_refresh_and_reaches_batch(self):
+        self.run_cmd('refresh')
+        f = self.root / '岗位交接/公司/中国大陆/甲公司/公司.json'
+        doc = json.loads(f.read_text(encoding='utf-8'))
+        doc['roles'][0]['投递链接'] = 'https://jia.jobs.example.cn/campus/apply/123456'
+        f.write_text(json.dumps(doc, ensure_ascii=False), encoding='utf-8')
+        self.run_cmd('refresh')
+        self.assertEqual(json.loads(f.read_text(encoding='utf-8'))['roles'][0]['投递链接'], 'https://jia.jobs.example.cn/campus/apply/123456')
+
     def test_bu_parallel_quota_splits_order_groups(self):
         m = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
         sh = m['sheets'][0]

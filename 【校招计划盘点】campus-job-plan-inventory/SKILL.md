@@ -32,4 +32,4 @@ metadata:
 
 使用父 Skill 的浏览器规则和 [标签分组](../【校招岗位收集与投递】campus-job-application/references/chrome-window-grouping.md)。每个标签标明所属公司，不占用其他公司或用户的标签与窗口。完成后按父 Skill 的读回后关窗规则，只处理当前公司的标签。盘点不授权打开申请表、上传、填写或提交。
 
-用户选择双浏览器并发时，按父 Skill 的 [搜索 MCP](../【校招岗位收集与投递】campus-job-application/references/search-mcp.md) 执行，两个浏览器处理不同公司。
+浏览器双开（`产品管理/求职配置.md`「浏览器」的默认）时，按父 Skill 的 [搜索 MCP](../【校招岗位收集与投递】campus-job-application/references/search-mcp.md) 执行，两个浏览器处理不同公司。

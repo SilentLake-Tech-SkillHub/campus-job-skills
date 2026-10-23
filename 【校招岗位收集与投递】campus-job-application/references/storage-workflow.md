@@ -9,7 +9,7 @@
 | 校招主链接、投递窗口 | 主数据 `校招主链接` 表 | `upsert` 同一行覆盖 |
 | 校招计划清单 | 主数据 `校招计划` 表（不存投递限制） | 同上 |
 | 字段与标签说明 | 主数据 `分类说明` 表 | `json_excel_sync.py set-sheet-rows` 整页覆盖 |
-| 投递组件运行数据（companyId、官网域名、官方岗位ID、志愿分组、用户给定的志愿顺序、城市选项） | `岗位交接/公司/<地区>/<公司>/公司.json` | `company_store.py refresh` 按主表覆盖重建；志愿顺序用 `set-order` 记录用户原话 |
+| 投递组件运行数据（companyId、官网域名、官方岗位ID、志愿分组、用户给定的志愿顺序、申请页链接、城市选项） | `岗位交接/公司/<地区>/<公司>/公司.json` | `company_store.py refresh` 按主表覆盖重建（保留申请页链接与志愿顺序）；志愿顺序用 `set-order` 记录用户原话；申请页链接（`投递链接`）只由投递组件 `role_enter_application` 写回 |
 | 各站点登录配置、表单定义 | 同目录 `登录[@域名].json`、`表单定义[@域名].json` | 投递组件建档 |
 | 当前投递批次与正向评审页 | `岗位交接/投递批次.json`、`岗位交接/正向评审.html` | `company_store.py forward / forward-confirm` |
 | 本轮一次性投递需求 | `产品管理/user_applicaiton_requirements_temp.json` | `application_requirements.py set` 覆盖写入；forward成功后立即清空，完成时检查 |

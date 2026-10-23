@@ -57,6 +57,25 @@ def kid(key):
     return json.dumps(key, ensure_ascii=False, sort_keys=True)
 
 
+def role_materials(values, master_hash):
+    """Freeze applicable role materials from their sole master row, not company.json."""
+    raw = str(values.get('内推码') or '').strip()
+    first = re.split(r'[｜|]', raw)[0].strip()
+    absent = not raw or bool(re.match(r'^(无|暂无|未找到|未发现|公司未披露|不适用|无需|没有)', raw))
+    code = first if not absent and re.fullmatch(r'[A-Za-z0-9_-]{3,64}', first) else None
+    status = 'available' if code else 'absent' if absent else 'unresolved'
+    return {'schemaVersion': 1, 'items': [{'key': 'referralCode', 'status': status,
+        'value': code, 'raw': raw, 'requireWhenAvailable': True,
+        'evidence': {'masterDataSha256': master_hash, 'company': values.get(S.COMPANY_COL),
+                     'roleUrl': values.get(S.LINK_COL), 'column': '内推码'}}]}
+
+
+def material_summary(role):
+    return '；'.join('推荐码：' + item['value'] + '（有则必填）' if item['status'] == 'available'
+                    else '推荐码：' + ('无已记录代码' if item['status'] == 'absent' else '待核实')
+                    for item in role.get('materials', {}).get('items', []))
+
+
 class Store:
     def __init__(self, workspace, labels):
         self.ctx = S.Ctx(workspace, labels)
@@ -303,10 +322,13 @@ class Store:
                 stored = by_key.get(kid(r['key']), {})
                 item = {'岗位ID': rid, '岗位名称': r['values'].get(S.NAME_COL), '岗位链接': link,
                         'BU': stored.get('BU') or r['values'].get('所属BU') or '未披露', '志愿分组': stored.get('志愿分组') or '公司'}
+                item['materials'] = role_materials(r['values'], master['data_sha256'])
                 if note:
                     item['链接说明'] = note[len(S.LINK_EXCEPTION_PREFIX):]
                 if stored.get('顺序') not in (None, ''):
                     item['顺序'] = stored['顺序']
+                if stored.get('投递链接'):  # 投递组件进入申请页后写回的申请页链接：下批直接从申请页进入
+                    item['投递链接'] = stored['投递链接']
                 ok.append(item)
             bad = self.order_problems(ok)
             for g, orders in bad.items():
@@ -318,7 +340,7 @@ class Store:
                 companies.append({'companyId': doc['companyId'], '公司': name, '地区': sheet,
                                   '公司文件': str(cf.relative_to(self.root)), '岗位': ok,
                                   'stage': '已建档' if any(folder.glob('登录*.json')) else '待建档'})
-        batch = {'schemaVersion': 2, 'batchId': 'B' + datetime.now().strftime('%Y%m%d%H%M%S'),
+        batch = {'schemaVersion': 2, 'materialContractVersion': 1, 'batchId': 'B' + datetime.now().strftime('%Y%m%d%H%M%S'),
                  'state': '等待正向评审', 'updatedAt': now(), 'masterDataSha256': master['data_sha256'],
                  'companies': companies, 'excluded': excluded, 'confirmation': None}
         if requirements.get('浏览器'):
@@ -330,10 +352,48 @@ class Store:
                 'roles': sum(len(c['岗位']) for c in companies), 'excluded': len(excluded),
                 'review': str(self.review_file.relative_to(self.root))}
 
+    def amend_materials(self, quote=None, expected_sha=None):
+        """Material-only amendment. Never reselect, reorder, or recreate queue roles."""
+        b = self.batch()
+        if not b or b.get('state') not in ('已交接', '进行中') or verify_handoff(b):
+            raise SystemExit('必须是已确认且未变更的当前批次')
+        prior_sha = content_sha(b)
+        master = self.ctx.load_master()
+        rows = self.master_rows(master)
+        changes = []
+        for c in b['companies']:
+            for role in c['岗位']:
+                hits = [r for r in rows.get((c['地区'], c['公司']), []) if r['kind'] == 'role'
+                        and r['values'].get(S.LINK_COL) == role['岗位链接']
+                        and r['values'].get(S.NAME_COL) == role['岗位名称']]
+                if len(hits) != 1:
+                    raise SystemExit('当前岗位无法唯一对应主表，拒绝补充材料')
+                materials = role_materials(hits[0]['values'], master['data_sha256'])
+                if materials != role.get('materials'):
+                    changes.append({'公司': c['公司'], '岗位': role['岗位名称'],
+                                    'current': role.get('materials'), 'updated': materials})
+                    role['materials'] = materials
+        b['materialContractVersion'] = 1
+        preview = {'batchId': b['batchId'], 'previousContentSha256': prior_sha, 'changes': changes,
+                   'newContentSha256': content_sha(b), 'selectionChanged': False}
+        if quote is None:
+            return preview
+        if not quote.strip() or expected_sha != prior_sha:
+            raise SystemExit('必须附用户授权原话和预览时的原批次摘要')
+        b['updatedAt'] = now()
+        b['confirmation'] = {'userQuote': quote.strip(), 'confirmedAt': b['updatedAt'],
+                             'contentSha256': content_sha(b), 'scope': 'materials_only',
+                             'previousContentSha256': prior_sha}
+        S.save_json(self.batch_file, b)
+        self.review(b)
+        if verify_handoff(self.batch()):
+            raise ValueError('补充材料后批次确认读回失败')
+        return preview
+
     def review(self, batch):
         rows = ''.join(
             f"<tr><td>{html.escape(c['地区'])}</td><td>{html.escape(c['公司'])}</td><td>{html.escape(c['stage'])}</td>"
-            f"<td>{'<br>'.join(html.escape(('' if r['志愿分组'] == '公司' else r['志愿分组'] + '｜') + ('第' + str(r['顺序']) + '志愿｜' if r.get('顺序') else '') + str(r['岗位名称']) + ('（链接例外：' + str(r['链接说明']) + '）' if r.get('链接说明') else '')) for r in c['岗位'])}</td></tr>" for c in batch['companies'])
+            f"<td>{'<br>'.join(html.escape(('' if r['志愿分组'] == '公司' else r['志愿分组'] + '｜') + ('第' + str(r['顺序']) + '志愿｜' if r.get('顺序') else '') + str(r['岗位名称']) + ('（链接例外：' + str(r['链接说明']) + '）' if r.get('链接说明') else '') + '｜' + material_summary(r)) for r in c['岗位'])}</td></tr>" for c in batch['companies'])
         ex = ''.join(f"<tr><td>{html.escape(e['地区'])}</td><td>{html.escape(str(e['公司']))}</td><td>{html.escape(str(e.get('岗位', '')))}</td>"
                      f"<td>{html.escape(e['原因'])}</td></tr>" for e in batch['excluded'])
         page = f"""<!doctype html><html lang=zh><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>正向评审</title>
@@ -399,6 +459,16 @@ class Store:
         b = self.batch()
         if not b or b.get('state') != '等待正向评审':
             raise SystemExit('没有等待正向评审的批次')
+        if b.get('materialContractVersion') != 1:
+            raise SystemExit('投递材料契约缺失，请重新生成正向评审')
+        master = self.ctx.load_master()
+        rows = self.master_rows(master)
+        for company in b['companies']:
+            for role in company['岗位']:
+                hits = [r for r in rows.get((company['地区'], company['公司']), []) if r['kind'] == 'role'
+                        and r['values'].get(S.LINK_COL) == role['岗位链接'] and r['values'].get(S.NAME_COL) == role['岗位名称']]
+                if len(hits) != 1 or role.get('materials') != role_materials(hits[0]['values'], master['data_sha256']):
+                    raise SystemExit('岗位材料遗漏或来源发生变化，请重新生成正向评审')
         at = now()
         b['confirmation'] = {'userQuote': quote.strip(), 'confirmedAt': at, 'contentSha256': content_sha(b)}
         b['state'], b['updatedAt'] = '已交接', at
@@ -471,6 +541,9 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     sub.add_parser('refresh')
     sub.add_parser('forward')
+    p = sub.add_parser('amend-materials')
+    p.add_argument('--quote', help='不传则仅预览；传用户明确授权原话后只补当前岗位材料')
+    p.add_argument('--expected-sha', help='预览返回的 previousContentSha256')
     p = sub.add_parser('set-order')
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link|title,顺序}]，同公司同分组一次给全')
     p.add_argument('--quote', required=True, help='用户给定顺序的原话')
@@ -489,6 +562,9 @@ def main():
     elif a.cmd == 'forward':
         with S.exclusive(st.ctx):
             out = st.forward(a.session, a.turn)
+    elif a.cmd == 'amend-materials':
+        with S.exclusive(st.ctx):
+            out = st.amend_materials(a.quote, a.expected_sha)
     elif a.cmd == 'set-order':
         with S.exclusive(st.ctx):
             out = st.set_order(json.loads(Path(a.input).read_text(encoding='utf-8')), a.quote)

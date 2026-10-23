@@ -285,6 +285,31 @@ class SyncTests(unittest.TestCase):
         self.assertEqual((out['total'], len(out['rows']), out['rows'][0]['values']['岗位名称']), (6, 2, '产品经理0'))
         self.assertNotEqual(self.run_cmd('query', ok=False).returncode, 0)
 
+    def test_diff_pairs_rows_by_identity_not_position(self):
+        self.migrate() if hasattr(self, 'migrate') else None
+        self.run_cmd('write')
+        m = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
+        rows = m['sheets'][0]['rows']
+        # 在第2行前插入一个新岗位：后面所有行下移一行，但内容没变
+        for r in rows:
+            if r['row'] >= 2:
+                r['row'] += 1
+        rows.insert(1, {'row': 2, 'cells': [{'column': 1, 'value': '上海', 'type': 's'}, {'column': 2, 'value': '甲公司', 'type': 's'},
+                                             {'column': 5, 'value': '新岗位', 'type': 's'}, {'column': 9, 'value': 'https://a.example/new', 'type': 's'}]})
+        for r in rows:
+            if any(c['column'] == 2 and c['value'] == '乙公司' for c in r['cells']):
+                for c in r['cells']:
+                    if c['column'] == 3:
+                        c['value'] = '金融'
+        (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(m, ensure_ascii=False), encoding='utf-8')
+        d = json.loads(self.run_cmd('diff', '--limit', '0').stdout)
+        self.assertEqual((d['added'], d['removed'], d['changed'], d['cells']), (1, 0, 1, 1))
+        self.assertGreaterEqual(d['moved'], 4)
+        self.assertIn('新增：中国大陆｜甲公司｜新岗位', d['text'])
+        self.assertIn('新岗位｜投递状态：', d['text'])  # 新增行同时显示投递状态
+        self.assertIn('修改：中国大陆｜乙公司｜公司行（第8行）：主要行业：当前「互联网」→写入「金融」', d['text'])
+        self.assertNotIn('公司：当前', d['text'])  # 不再把位置挪动报成换公司
+
     def test_report_summarizes_company_from_master_json(self):
         out = json.loads(self.run_cmd('report', '--company', '甲公司', '--company', '乙公司').stdout)
         a, b = out

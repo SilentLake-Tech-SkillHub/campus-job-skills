@@ -32,7 +32,7 @@ class HookDetailsTests(unittest.TestCase):
             (root / '产品管理/投递状态标签.json').write_text(json.dumps(cfg), encoding='utf-8')
             before = (root / 'book.xlsx').read_bytes()
             result = hook.pending_details(root)
-            self.assertIn('实际差异：1行、2个单元格', result)
+            self.assertIn('实际变化：新增 0 行、删除 0 行、修改 1 行（2 个单元格）', result)
             self.assertIn('当前「岗位待筛选」→写入「岗位待投递」', result)
             self.assertIn('甲公司｜AI产品经理', result)
             self.assertIn('原备注', result)
@@ -56,6 +56,17 @@ class HookDetailsTests(unittest.TestCase):
         body = '*** Begin Patch\n*** Update File: /work/safe.py\n*** Move to: /work/master.json\n*** End Patch'
         self.assertIn('master.json', hook.tool_violation(cfg, {'tool_name': 'apply_patch', 'tool_input': body}))
 
+    def test_patch_command_envelope_still_checks_actual_target(self):
+        cfg = {'workbook': 'book.xlsx', 'masterData': 'master.json', 'confirmationLedger': 'ledger.json'}
+        safe = '*** Begin Patch\n*** Update File: /work/test_example.py\n+writeFile master.json\n*** End Patch'
+        self.assertIsNone(hook.tool_violation(cfg, {'tool_name': 'apply_patch', 'tool_input': {'command': safe}}))
+        wrapped = 'text(await tools.apply_patch(' + json.dumps(safe) + '));'
+        self.assertIsNone(hook.tool_violation(cfg, {'tool_name': 'functions.exec', 'tool_input': {'input': wrapped}}))
+        denied = safe.replace('/work/test_example.py', '/work/master.json')
+        for name, args in [('apply_patch', {'command': denied}), ('functions.exec', {'input': 'text(await tools.apply_patch(' + json.dumps(denied) + '));'})]:
+            self.assertIn('master.json', hook.tool_violation(cfg, {'tool_name': name, 'tool_input': args}))
+        self.assertIsNotNone(hook.tool_violation(cfg, {'tool_name': 'functions.exec', 'tool_input': {'input': wrapped + '; write_text("master.json")'}}))
+
 
 class LabelGroupTests(unittest.TestCase):
     def test_rules_text_and_guard_cover_every_label_group(self):
@@ -76,6 +87,21 @@ class LabelGroupTests(unittest.TestCase):
             self.assertIn('产品管理/公司状态标签.json', hook.protected(cfg))
             body = '*** Begin Patch\n*** Update File: /work/产品管理/公司状态标签.json\n*** End Patch'
             self.assertIsNotNone(hook.tool_violation(cfg, {'tool_name': 'apply_patch', 'tool_input': body}))
+
+
+class BrowserRuleTests(unittest.TestCase):
+    def test_browser_section_is_injected_from_the_single_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / '产品管理').mkdir()
+            self.assertIn('读取 产品管理/求职配置.md 失败', hook.browser_rules(root))
+            (root / '产品管理/求职配置.md').write_text('# 配置\n\n## 浏览器\n\n- 默认双开。\n- 单开用内置浏览器。\n\n## 组件\n\n- x\n', encoding='utf-8')
+            text = hook.browser_rules(root)
+            self.assertIn('唯一来源', text)
+            self.assertIn('- 默认双开。\n- 单开用内置浏览器。', text)
+            self.assertNotIn('组件', text.split('】', 1)[1])
+            (root / '产品管理/求职配置.md').write_text('# 配置\n\n## 组件\n', encoding='utf-8')
+            self.assertIn('缺少「## 浏览器」', hook.browser_rules(root))
 
 
 class StackGuardTests(unittest.TestCase):
@@ -202,13 +228,19 @@ class ConversationReminderTests(unittest.TestCase):
              patch.object(hook, 'load_cfg', return_value=cfg), \
              patch.object(hook, 'record_approval', return_value='') as approval, \
              patch.object(hook, 'rules_text', return_value='RULES'), \
+             patch.object(hook, 'browser_rules', return_value='BROWSER'), \
              patch.object(hook, 'pending_text', return_value=('PENDING', {})) as pending, \
              patch.object(hook, 'sync', return_value={}) as sync:
             hook.main()
             return json.loads(out.getvalue()), pending.called, sync.called, approval.called
 
-    def test_disabled_session_skips_all_notification_events(self):
-        for event in ('SessionStart', 'UserPromptSubmit', 'SubagentStart', 'PreInvocation', 'Stop', 'SubagentStop'):
+    def test_disabled_session_skips_only_excel_reminders(self):
+        """关闭写入提醒的会话：不提示、不拦截写入 Excel，但门禁规则和浏览器规则照常注入。"""
+        for event in ('SessionStart', 'UserPromptSubmit', 'SubagentStart', 'PreInvocation'):
+            result, pending, sync, _ = self.invoke(event)
+            self.assertEqual(result['hookSpecificOutput']['additionalContext'], 'RULESBROWSER', event)
+            self.assertFalse(pending, event)
+        for event in ('Stop', 'SubagentStop'):
             result, pending, sync, _ = self.invoke(event)
             self.assertEqual(result, {}, event)
             self.assertFalse(pending, event)
@@ -216,7 +248,7 @@ class ConversationReminderTests(unittest.TestCase):
 
     def test_other_session_keeps_startup_reminder_and_stop_block(self):
         result, pending, _, _ = self.invoke('UserPromptSubmit', 'search-session')
-        self.assertEqual(result['hookSpecificOutput']['additionalContext'], 'RULESPENDING')
+        self.assertEqual(result['hookSpecificOutput']['additionalContext'], 'RULESBROWSERPENDING')
         self.assertTrue(pending)
         result, pending, sync, _ = self.invoke('Stop', 'search-session')
         self.assertEqual(result['decision'], 'block')

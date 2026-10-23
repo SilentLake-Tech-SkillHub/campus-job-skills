@@ -1,6 +1,6 @@
 # 搜索 MCP 与双浏览器并发
 
-用户明确选择 Chrome 与内置浏览器并发搜索时使用。这是同一执行者的两个浏览器通道，不自动创建多个 AI，也不授予任何投递权限。搜索 MCP 由 `scripts/search_mcp.py` 提供（依赖见 `scripts/search-mcp-requirements.txt`），任务队列放在 `CAMPUS_SEARCH_PRIVATE_DIR` 指定的私有运行目录，不进公开包。
+按 `产品管理/求职配置.md`「浏览器」双开（默认）时使用。这是同一执行者的两个浏览器通道，不自动创建多个 AI，也不授予任何投递权限。搜索 MCP 由 `scripts/search_mcp.py` 提供（依赖见 `scripts/search-mcp-requirements.txt`），任务队列放在 `CAMPUS_SEARCH_PRIVATE_DIR` 指定的私有运行目录，不进公开包。
 
 MCP 管理任务、每个通道内各公司的独占租约、证据收回和分轮检查；真实网页操作由宿主的浏览器工具执行。派发成功不等于访问成功。
 

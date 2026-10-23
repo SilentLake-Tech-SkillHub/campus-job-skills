@@ -472,53 +472,119 @@ def _part(v):
     return v
 
 
+ROW_KEY_COLUMNS = {'校招主链接': ('公司',), '校招计划': ('公司', '计划'), '投递名额': ('公司', '范围')}
+
+
+def _by_name(cells):
+    """{(行,列): 单元格} → 表头名 与 {行号: {列名: 单元格}}；没有表头名的列记为“第N列”。"""
+    head = {c: (v.get('value') if isinstance(v, dict) else v) for (r, c), v in cells.items() if r == 1}
+    rows = {}
+    for (r, c), v in cells.items():
+        if r > 1:
+            rows.setdefault(r, {})[head.get(c) or f'第{c}列'] = v
+    return [h for _, h in sorted(head.items()) if h], rows
+
+
+def _identity(ctx, sheet_name, head, row):
+    """按内容认行：地区表用 公司+岗位链接/岗位名（公司行只按公司）；其他表用公司+计划/范围；兜底用第一列。"""
+    val = lambda h: (row.get(h) or {}).get('value')
+    if sheet_name in ctx.sheets and COMPANY_COL in head:
+        link, name = val(LINK_COL), val(NAME_COL)
+        k = {'sheet': sheet_name, 'company': val(COMPANY_COL)}
+        if link:
+            k['link'] = link
+        if name:
+            k['title'] = name
+        if not link and not name:
+            k['placeholder'] = True
+        return key_id(k), describe(k)
+    cols = ROW_KEY_COLUMNS.get(sheet_name) or tuple(head[:1])
+    parts = [str(val(h) or '') for h in cols]
+    return json.dumps([sheet_name, parts], ensure_ascii=False), f"{sheet_name}｜{'｜'.join(p for p in parts if p) or '空行'}"
+
+
+def _keyed(ctx, sheet_name, head, rows):
+    out, seen = {}, {}
+    for rn in sorted(rows):
+        k, label = _identity(ctx, sheet_name, head, rows[rn])
+        n = seen[k] = seen.get(k, 0) + 1
+        out[(k, n)] = (rn, label if n == 1 else f'{label}（第{n}条同名）', rows[rn])
+    return out
+
+
+def _row_status(ctx, row, head):
+    """新增/删除的岗位行、公司行同时显示投递状态；空状态明确标出（须 propose→用户确认）。"""
+    if ctx.column not in head:
+        return ''
+    v = (row.get(ctx.column) or {}).get('value')
+    return f'｜投递状态：{v}' if v not in (None, '') else '｜投递状态：空（未确认，须 propose→用户确认）'
+
+
 def diff_details(ctx, master, limit=30):
-    """JSON 写入 Excel 后的实际单元格差异：逐行列出“当前→写入”，供向用户展示（不只报总数）。"""
+    """JSON 写入 Excel 后的实际变化：按内容（公司+岗位/计划/范围）配对行、按列名配对列比较，
+    只列新增行、删除行和同一行里真正改变的单元格；行或列只是位置挪动的，写入后自动对齐，只报数量。"""
     wb = load_workbook(ctx.book)
-    rows, by_col, cells = [], {}, 0
+    lines, by_col = [], {}
+    added = removed = changed_rows = cells = moved = 0
     try:
         for s in master['sheets']:
-            a = excel_cells(wb[s['name']]) if s['name'] in wb.sheetnames else {}
-            b = json_cells(s)
-            first = next((r for r in s['rows'] if r['row'] == 1), {'cells': []})
-            head = {c['column']: c.get('value') for c in first['cells']}
-            idx = {v: k for k, v in head.items() if v}
-            jrows = {r['row']: r for r in s['rows']}
-            changed = {}
-            for k in sorted(set(a) | set(b)):
-                if a.get(k) != b.get(k):
-                    changed.setdefault(k[0], []).append(k[1])
-            for rn in sorted(changed):
-                jr = jrows.get(rn) or {'row': rn, 'cells': [{'column': c, 'value': (a.get((rn, c)) or {}).get('value')} for (r0, c) in a if r0 == rn]}
-                if rn == 1:
-                    label = s['name'] + '｜表头'
-                elif COMPANY_COL in idx:
-                    k = row_key(s['name'], jr, idx)
-                    label = describe(k) + f'（第{rn}行）'
-                else:
-                    label = f"{s['name']}｜第{rn}行"
+            ehead, erows = _by_name(excel_cells(wb[s['name']]) if s['name'] in wb.sheetnames else {})
+            jhead, jrows = _by_name(json_cells(s))
+            name = s['name']
+            gone, new_cols = [h for h in ehead if h not in jhead], [h for h in jhead if h not in ehead]
+            if gone or new_cols:
+                lines.append(f"{name}｜表头：" + '；'.join(([f"删除列：{'、'.join(gone)}"] if gone else [])
+                                                      + ([f"新增列：{'、'.join(new_cols)}"] if new_cols else [])))
+            if name not in wb.sheetnames:
+                lines.append(f'{name}：新增整张工作表（{len(jrows)} 行）')
+                added += len(jrows)
+                continue
+            old, cur = _keyed(ctx, name, ehead, erows), _keyed(ctx, name, jhead, jrows)
+            if name not in ctx.sheets:
+                # 计划名/范围改了：同一公司只有一条消失、一条新出现时，当作同一行的修改
+                lost = {}
+                for k in [k for k in old if k not in cur]:
+                    lost.setdefault(json.loads(k[0])[1][0], []).append(k)
+                for k in [k for k in cur if k not in old]:
+                    comp = json.loads(k[0])[1][0]
+                    fresh = [x for x in cur if x not in old and json.loads(x[0])[1][0] == comp]
+                    if len(lost.get(comp, [])) == 1 and len(fresh) == 1:
+                        old[k] = old.pop(lost.pop(comp)[0])
+            for k in [k for k in cur if k not in old]:
+                added += 1
+                lines.append(f'新增：{cur[k][1]}{_row_status(ctx, cur[k][2], jhead)}（第{cur[k][0]}行）')
+            for k in [k for k in old if k not in cur]:
+                removed += 1
+                lines.append(f'删除：{old[k][1]}{_row_status(ctx, old[k][2], ehead)}（原第{old[k][0]}行）')
+            for k in [k for k in cur if k in old]:
+                (orn, _, orow), (rn, label, row) = old[k], cur[k]
+                moved += orn != rn
                 items = []
-                for col in changed[rn]:
+                for col in [h for h in jhead if h in ehead] + [h for h in sorted(set(row) | set(orow)) if h.startswith('第') and h.endswith('列')]:
+                    a, b = orow.get(col) or {}, row.get(col) or {}
+                    if a == b:
+                        continue
                     cells += 1
-                    name = head.get(col) or f'第{col}列'
-                    by_col[name] = by_col.get(name, 0) + 1
-                    old, new = a.get((rn, col)) or {}, b.get((rn, col)) or {}
-                    if old.get('value') != new.get('value'):
-                        items.append(f"{name}：当前「{_show(old.get('value'))}」→写入「{_show(new.get('value'))}」")
+                    by_col[col] = by_col.get(col, 0) + 1
+                    if a.get('value') != b.get('value'):
+                        items.append(f"{col}：当前「{_show(a.get('value'))}」→写入「{_show(b.get('value'))}」")
                     else:
                         for part, zh in (('hyperlink', '超链接'), ('note', '批注')):
-                            if old.get(part) != new.get(part):
-                                items.append(f"{name}{zh}：当前「{_show(_part(old.get(part)))}」→写入「{_show(_part(new.get(part)))}」")
-                rows.append(label + '：' + '；'.join(items))
+                            if a.get(part) != b.get(part):
+                                items.append(f"{col}{zh}：当前「{_show(_part(a.get(part)))}」→写入「{_show(_part(b.get(part)))}」")
+                if items:
+                    changed_rows += 1
+                    lines.append(f'修改：{label}（第{rn}行）：' + '；'.join(items))
     finally:
         wb.close()
-    head_line = f'实际差异：{len(rows)}行、{cells}个单元格'
-    cols = '按列：' + '、'.join(f'{k} {v}' for k, v in sorted(by_col.items(), key=lambda x: -x[1])) if by_col else ''
-    shown = rows[:limit]
-    more = [f'……其余 {len(rows) - limit} 行未展开，可运行 json_excel_sync.py diff --limit 0 查看全部'] if len(rows) > limit else []
-    return {'rows': len(rows), 'cells': cells, 'by_column': by_col,
+    head_line = (f'实际变化：新增 {added} 行、删除 {removed} 行、修改 {changed_rows} 行（{cells} 个单元格）'
+                 + (f'；另有 {moved} 行只是位置挪动（写入后自动对齐，内容不变）' if moved else ''))
+    cols = '修改的列：' + '、'.join(f'{k} {v}' for k, v in sorted(by_col.items(), key=lambda x: -x[1])) if by_col else ''
+    shown = lines[:limit]
+    more = [f'……其余 {len(lines) - limit} 条未展开，可运行 json_excel_sync.py diff --limit 0 查看全部'] if len(lines) > limit else []
+    return {'rows': added + removed + changed_rows, 'added': added, 'removed': removed, 'changed': changed_rows,
+            'moved': moved, 'cells': cells, 'by_column': by_col,
             'text': '\n'.join([head_line] + ([cols] if cols else []) + shown + more)}
-
 
 def excel_statuses(ctx):
     wb = load_workbook(ctx.book, read_only=True)
@@ -983,6 +1049,7 @@ def confirm(ctx, items, quote, ref):
 def upsert(ctx, items):
     master = ctx.load_master()
     added = updated = 0
+    duplicates_removed = 0
     touched = []
     for d in items:
         key = normalize_key(d['key'])
@@ -994,7 +1061,23 @@ def upsert(ctx, items):
         unknown = set(fields) - set(idx)
         if unknown:
             raise SystemExit('未知表头：' + '、'.join(sorted(unknown)))
-        hits = [r for r in s['rows'] if r['row'] > 1 and key_id(row_key(key['sheet'], r, idx)) == key_id(key)]
+        hits = [r for r in s['rows'] if r['row'] > 1 and all(
+            row_key(key['sheet'], r, idx).get(k) == v for k, v in key.items())]
+        if len(hits) > 1 and d.get('drop_empty_duplicates'):
+            if not key.get('link') or not key.get('title'):
+                raise SystemExit('清理空状态重复行必须同时提供岗位链接和岗位名称')
+            kept = [r for r in hits if cell_value(r, idx[ctx.column]) not in (None, '')]
+            if len(kept) != 1 or any(row_key(key['sheet'], r, idx) != key for r in hits):
+                raise SystemExit('只能清理同一完整业务键下、唯一有状态岗位旁的空状态重复行')
+            gone = [r for r in hits if r is not kept[0]]
+            removed = sorted(r['row'] for r in gone)
+            gone_ids = {id(r) for r in gone}
+            s['rows'] = [r for r in s['rows'] if id(r) not in gone_ids]
+            for r in s['rows']:
+                r['row'] -= sum(n < r['row'] for n in removed)
+            s['max_row'] = max(r['row'] for r in s['rows'])
+            duplicates_removed += len(gone)
+            hits = kept
         if len(hits) > 1:
             raise SystemExit('业务键匹配多行：' + key_id(key))
         if hits:
@@ -1056,7 +1139,7 @@ def upsert(ctx, items):
             created.append(f"{s['name']}｜{key['company']}")
     refresh_digest(master)
     save_master(ctx, master)
-    return {'added': added, 'updated': updated, 'company_rows_created': created,
+    return {'added': added, 'updated': updated, 'duplicates_removed': duplicates_removed, 'company_rows_created': created,
             'note': '新增行（含自动补的公司行）投递状态为空：必须向用户展示“当前状态是空，更新状态是Y”并确认后，才能写入 Excel'}
 
 
