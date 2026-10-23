@@ -127,9 +127,29 @@ class Requirements:
         while True:
             try:
                 fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                os.write(fd, json.dumps({'pid': os.getpid(), 'createdAt': time.time()}).encode())
                 os.close(fd)
                 break
             except FileExistsError:
+                try:
+                    before = lock.stat()
+                    text = lock.read_text().strip()
+                    owner = json.loads(text) if text else {}
+                    stale = not owner and time.time() - before.st_mtime > 600
+                    pid = owner.get('pid')
+                    if isinstance(pid, int) and pid > 0 and os.name != 'nt':
+                        try:
+                            os.kill(pid, 0)
+                        except ProcessLookupError:
+                            stale = True
+                        except PermissionError:
+                            pass
+                    after = lock.stat()
+                    if stale and (before.st_ino, before.st_mtime_ns) == (after.st_ino, after.st_mtime_ns):
+                        lock.unlink()
+                        continue
+                except (FileNotFoundError, ValueError, OSError):
+                    pass
                 if time.monotonic() >= deadline:
                     raise ValueError('需求表正在被另一操作使用，请稍后重试')
                 time.sleep(0.02)

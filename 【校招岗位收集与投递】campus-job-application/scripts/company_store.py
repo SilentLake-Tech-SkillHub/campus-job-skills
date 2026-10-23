@@ -432,8 +432,10 @@ class Store:
         if not quote or not quote.strip():
             raise SystemExit('必须提供用户确认原话')
         b = self.batch()
-        if not b or b.get('state') != '等待反向评审':
+        if not b or b.get('state') not in ('等待反向评审', '已回写'):
             raise SystemExit('没有等待反向评审的批次，请先运行 reverse')
+        if (b.get('confirmation') or {}).get('contentSha256') != content_sha(b):
+            raise SystemExit('投递批次在确认后被改动，须重新正向评审')
         items, notes, roles = _reverse_items(self)
         if items:
             S.confirm(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], quote.strip(), f"反向评审 {b['batchId']}")
@@ -444,14 +446,25 @@ class Store:
             S.save_json(f, {'schemaVersion': 1, 'roles': left})
         elif f.exists():
             f.unlink()
-        if not left:
-            b['state'] = '已回写'
+        processed = set(b.get('progress', {}).get('processedOutcomeKeys', [])) | done
+        rows = self.master_rows(self.ctx.load_master())
+        pending = []
+        for company in b['companies']:
+            for role in company['岗位']:
+                key = company['companyId'] + '|' + role['岗位ID']
+                matches = [r for r in rows.get((company['地区'], company['公司']), [])
+                           if r['values'].get(S.LINK_COL) == role['岗位链接']]
+                closed = len(matches) == 1 and matches[0]['values'].get(self.ctx.column) not in ('岗位待投递', '岗位待筛选', None, '')
+                if key not in processed and not closed:
+                    pending.append(key)
+        b['progress'] = {'processedOutcomeKeys': sorted(processed), 'remainingRoleKeys': sorted(pending)}
+        b['state'] = '等待反向评审' if left else '进行中' if pending else '已回写'
         b['updatedAt'] = now()
         S.save_json(self.batch_file, b)
-        if not left:
+        if b['state'] == '已回写':
             from application_requirements import Requirements
             Requirements(self.root).complete(b['batchId'])
-        return {'batchId': b['batchId'], 'state': b['state'], 'statusChanges': len(items), 'unresolved': sorted(left)}
+        return {'batchId': b['batchId'], 'state': b['state'], 'statusChanges': len(items), 'unresolved': sorted(left), 'remainingRoles': len(pending)}
 
     def forward_confirm(self, quote):
         if not quote or not quote.strip():
@@ -517,7 +530,7 @@ def _reverse_items(st):
 
 
 def content_sha(batch):
-    body = {k: v for k, v in batch.items() if k not in ('confirmation', 'state', 'updatedAt')}
+    body = {k: v for k, v in batch.items() if k not in ('confirmation', 'state', 'updatedAt', 'progress')}
     return sha(json.dumps(body, ensure_ascii=False, sort_keys=True).encode())
 
 

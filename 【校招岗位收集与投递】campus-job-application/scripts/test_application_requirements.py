@@ -8,6 +8,21 @@ import json_excel_sync as S
 
 
 class RequirementsTests(unittest.TestCase):
+    def test_stale_legacy_lock_is_recovered_and_live_owner_is_preserved(self):
+        import os, time
+        lock = self.root / '.runtime/user_application_requirements.lock'
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text('')
+        os.utime(lock, (time.time() - 1200, time.time() - 1200))
+        with self.store.locked():
+            self.assertEqual(json.loads(lock.read_text())['pid'], os.getpid())
+        self.assertFalse(lock.exists())
+        lock.write_text(json.dumps({'pid': os.getpid(), 'createdAt': time.time()}))
+        with self.assertRaisesRegex(ValueError, '另一操作'):
+            with self.store.locked():
+                self.fail('active lock must never be acquired')
+        self.assertTrue(lock.exists())
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
