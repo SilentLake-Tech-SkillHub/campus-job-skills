@@ -321,6 +321,60 @@ def _prompt(payload):
     return ''
 
 
+QUESTION_REPLY_TAG = 'send_user_message_question_reply'
+QUESTION_REPLY = re.compile(r'\A<send_user_message_question_reply>\s*(.*?)\s*</send_user_message_question_reply>\Z', re.S)
+QUESTION_CALL_ID = re.compile(r'call_[A-Za-z0-9_-]+\Z')
+
+
+def _approval_prompts(payload):
+    """Read only the submitted user's text; quoted questions cannot grant or deny approval."""
+    prompt = next((payload[k] for k in PROMPT_KEYS
+                   if isinstance(payload.get(k), str) and payload[k].strip()), '')
+    if not prompt:
+        return []
+    if QUESTION_REPLY_TAG not in prompt:
+        return [prompt]
+    match = QUESTION_REPLY.fullmatch(prompt.strip())
+    if not match:
+        return []
+
+    def unique_object(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError('duplicate key')
+            value[key] = item
+        return value
+
+    try:
+        items = json.loads(match.group(1), object_pairs_hook=unique_object)
+        if not isinstance(items, list) or not items:
+            return []
+        answers, seen = [], set()
+        for item in items:
+            if (not isinstance(item, dict)
+                    or set(item) != {'questionItemId', 'question', 'answer'}
+                    or not isinstance(item['questionItemId'], str)
+                    or not isinstance(item['question'], str)
+                    or not isinstance(item['answer'], str)):
+                return []
+            identity = json.loads(item['questionItemId'])
+            if (not isinstance(identity, list) or len(identity) != 3
+                    or identity[0] != 'request_user_input_async'
+                    or not isinstance(identity[1], str)
+                    or not QUESTION_CALL_ID.fullmatch(identity[1])
+                    or type(identity[2]) is not int or identity[2] < 0):
+                return []
+            key = (identity[1], identity[2])
+            if key in seen:
+                return []
+            seen.add(key)
+            answers.append(item['answer'])
+        return answers
+    except (ValueError, TypeError, RecursionError):
+        return []
+
+
 def _debug(root, event, payload, found):
     """只记字段名和是否取到原话，不记内容；排查宿主 payload 用，覆盖写。"""
     try:
@@ -343,20 +397,22 @@ def _load_approvals(root):
 
 def record_approval(root, payload):
     """只看用户本人发出的消息：明确批准修改组件 → 记录本会话批准；收回 → 删除。返回给 AI 的提示。"""
-    prompt = _prompt(payload)
-    _debug(root, 'UserPromptSubmit', payload, bool(prompt.strip()))
-    if not prompt.strip():
+    prompts = _approval_prompts(payload)
+    _debug(root, 'UserPromptSubmit', payload, any(p.strip() for p in prompts))
+    if not any(p.strip() for p in prompts):
         return ''
     sid, data = _session(payload), _load_approvals(root)
     now = __import__('time').time()
     data = {k: v for k, v in data.items() if v.get('expiresAt', 0) > now}
     note = ''
-    if REVOKE.search(prompt):
+    approval_quotes = [p.strip() for p in prompts if COMPONENT_WORD.search(p) and APPROVE_MODIFY.search(p)
+                       and not NEGATED.search(p) and not CONDITIONAL.search(p)]
+    if any(REVOKE.search(p) for p in prompts):
         data.pop(sid, None)
         note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'
-    elif COMPONENT_WORD.search(prompt) and APPROVE_MODIFY.search(prompt) and not NEGATED.search(prompt) and not CONDITIONAL.search(prompt):
+    elif approval_quotes:
         hours = 2 if sid == '_no_session' else APPROVAL_HOURS
-        data[sid] = {'userQuote': prompt.strip()[:300], 'approvedAt': now, 'expiresAt': now + hours * 3600}
+        data[sid] = {'userQuote': '\n'.join(approval_quotes)[:300], 'approvedAt': now, 'expiresAt': now + hours * 3600}
         note = f'\n【组件软锁】已记录用户批准：本会话可以修改搜索组件、投递组件和 Hook 配置（{hours} 小时内有效，用户说“收回授权”即失效）。修改仍须按用户的具体要求进行，并逐项汇报。'
     else:
         return '\n【组件软锁】本会话已获用户批准修改组件。' if sid in data else ''
