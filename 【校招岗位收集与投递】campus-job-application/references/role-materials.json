@@ -1,0 +1,15 @@
+{
+  "说明": "岗位材料定义（搜索端）。每一项把主表的一列转成投递批次 roles[].materials.items 的一条：key 必须与投递组件 catalog/role-materials.json 的 key 一致；新增材料在两边各加一项。separator 只取第一段；absent 匹配“明确没有”；value 不匹配时记为待核实。",
+  "schemaVersion": 1,
+  "materials": [
+    {
+      "key": "referralCode",
+      "label": "推荐码",
+      "column": "内推码",
+      "separator": "[｜|]",
+      "absent": "^(无|暂无|未找到|未发现|公司未披露|不适用|无需|没有)",
+      "value": "[A-Za-z0-9_-]{3,64}",
+      "requireWhenAvailable": true
+    }
+  ]
+}

@@ -57,23 +57,36 @@ def kid(key):
     return json.dumps(key, ensure_ascii=False, sort_keys=True)
 
 
+MATERIAL_DEFINITIONS_FILE = Path(__file__).resolve().parents[1] / 'references' / 'role-materials.json'
+
+
+def material_definitions():
+    """岗位材料定义只在 references/role-materials.json；新增材料只加一项。"""
+    return json.loads(MATERIAL_DEFINITIONS_FILE.read_text(encoding='utf-8'))['materials']
+
+
 def role_materials(values, master_hash):
     """Freeze applicable role materials from their sole master row, not company.json."""
-    raw = str(values.get('内推码') or '').strip()
-    first = re.split(r'[｜|]', raw)[0].strip()
-    absent = not raw or bool(re.match(r'^(无|暂无|未找到|未发现|公司未披露|不适用|无需|没有)', raw))
-    code = first if not absent and re.fullmatch(r'[A-Za-z0-9_-]{3,64}', first) else None
-    status = 'available' if code else 'absent' if absent else 'unresolved'
-    return {'schemaVersion': 1, 'items': [{'key': 'referralCode', 'status': status,
-        'value': code, 'raw': raw, 'requireWhenAvailable': True,
-        'evidence': {'masterDataSha256': master_hash, 'company': values.get(S.COMPANY_COL),
-                     'roleUrl': values.get(S.LINK_COL), 'column': '内推码'}}]}
+    items = []
+    for d in material_definitions():
+        raw = str(values.get(d['column']) or '').strip()
+        first = re.split(d['separator'], raw)[0].strip()
+        absent = not raw or bool(re.match(d['absent'], raw))
+        value = first if not absent and re.fullmatch(d['value'], first) else None
+        status = 'available' if value else 'absent' if absent else 'unresolved'
+        items.append({'key': d['key'], 'status': status, 'value': value, 'raw': raw,
+                      'requireWhenAvailable': d['requireWhenAvailable'],
+                      'evidence': {'masterDataSha256': master_hash, 'company': values.get(S.COMPANY_COL),
+                                   'roleUrl': values.get(S.LINK_COL), 'column': d['column']}})
+    return {'schemaVersion': 1, 'items': items}
 
 
 def material_summary(role):
-    return '；'.join('推荐码：' + item['value'] + '（有则必填）' if item['status'] == 'available'
-                    else '推荐码：' + ('无已记录代码' if item['status'] == 'absent' else '待核实')
-                    for item in role.get('materials', {}).get('items', []))
+    labels = {d['key']: d['label'] for d in material_definitions()}
+    return '；'.join(labels.get(item['key'], item['key']) + '：' + (
+        item['value'] + '（有则必填）' if item['status'] == 'available'
+        else '无已记录' if item['status'] == 'absent' else '待核实')
+        for item in role.get('materials', {}).get('items', []))
 
 
 class Store:
@@ -381,9 +394,7 @@ class Store:
         if not quote.strip() or expected_sha != prior_sha:
             raise SystemExit('必须附用户授权原话和预览时的原批次摘要')
         b['updatedAt'] = now()
-        b['confirmation'] = {'userQuote': quote.strip(), 'confirmedAt': b['updatedAt'],
-                             'contentSha256': content_sha(b), 'scope': 'materials_only',
-                             'previousContentSha256': prior_sha}
+        set_confirmation(b, 'materials', quote.strip(), b['updatedAt'], previousContentSha256=prior_sha)
         S.save_json(self.batch_file, b)
         self.review(b)
         if verify_handoff(self.batch()):
@@ -432,7 +443,7 @@ class Store:
         if not quote or not quote.strip():
             raise SystemExit('必须提供用户确认原话')
         b = self.batch()
-        if not b or b.get('state') not in ('等待反向评审', '已回写'):
+        if not b or b.get('state') != '等待反向评审':
             raise SystemExit('没有等待反向评审的批次，请先运行 reverse')
         if (b.get('confirmation') or {}).get('contentSha256') != content_sha(b):
             raise SystemExit('投递批次在确认后被改动，须重新正向评审')
@@ -483,7 +494,8 @@ class Store:
                 if len(hits) != 1 or role.get('materials') != role_materials(hits[0]['values'], master['data_sha256']):
                     raise SystemExit('岗位材料遗漏或来源发生变化，请重新生成正向评审')
         at = now()
-        b['confirmation'] = {'userQuote': quote.strip(), 'confirmedAt': at, 'contentSha256': content_sha(b)}
+        b['confirmation'] = None
+        set_confirmation(b, 'selection', quote.strip(), at)
         b['state'], b['updatedAt'] = '已交接', at
         S.save_json(self.batch_file, b)
         return {'batchId': b['batchId'], 'state': b['state']}
@@ -527,6 +539,24 @@ def _reverse_items(st):
             notes.append({'key': key, 'event': o['event'], 'title': o['roleTitle'],
                           '说明': '投递结果不确定或受阻，处理前禁止重跑' if o['event'] in UNRESOLVED else '用户跳过，状态不变'})
     return items, notes, roles
+
+
+# 确认按作用域保存：选岗（selection）与补材料（materials）各留最新一条，互不覆盖。
+# 顶层 userQuote/confirmedAt/contentSha256 是当前生效的门禁（最近一次确认），供投递端核对；
+# 顶层 scope 沿用投递端约定：materials 作用域写 'materials_only'。
+SCOPE_LABEL = {'selection': 'selection', 'materials': 'materials_only'}
+
+
+def set_confirmation(b, scope, quote, at, **extra):
+    prior = b.get('confirmation') or {}
+    scopes = dict(prior.get('scopes') or {})
+    if prior and not scopes and prior.get('userQuote') and prior.get('scope') != 'materials_only':
+        scopes['selection'] = {'userQuote': prior['userQuote'], 'confirmedAt': prior.get('confirmedAt'),
+                               'contentSha256': prior.get('contentSha256')}
+    current = content_sha(b)
+    scopes[scope] = {'userQuote': quote, 'confirmedAt': at, 'contentSha256': current, **extra}
+    b['confirmation'] = {'userQuote': quote, 'confirmedAt': at, 'contentSha256': current,
+                         'scope': SCOPE_LABEL[scope], **extra, 'scopes': scopes}
 
 
 def content_sha(batch):

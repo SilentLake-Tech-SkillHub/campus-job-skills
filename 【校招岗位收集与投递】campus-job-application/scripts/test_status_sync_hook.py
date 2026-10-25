@@ -67,6 +67,18 @@ class HookDetailsTests(unittest.TestCase):
             self.assertIn('master.json', hook.tool_violation(cfg, {'tool_name': name, 'tool_input': args}))
         self.assertIsNotNone(hook.tool_violation(cfg, {'tool_name': 'functions.exec', 'tool_input': {'input': wrapped + '; write_text("master.json")'}}))
 
+    def test_patch_guard_compares_full_path_not_file_name(self):
+        cfg = {'workbook': 'book.xlsx', 'masterData': '岗位交接/master.json', 'confirmationLedger': 'ledger.json'}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            other = '*** Begin Patch\n*** Update File: ' + str(root / 'tests/fixtures/master.json') + '\n*** End Patch'
+            self.assertIsNone(hook.tool_violation(cfg, {'tool_name': 'apply_patch', 'tool_input': other}, root))
+            real = '*** Begin Patch\n*** Update File: ' + str(root / '岗位交接/master.json') + '\n*** End Patch'
+            self.assertIn('岗位交接/master.json', hook.tool_violation(cfg, {'tool_name': 'apply_patch', 'tool_input': real}, root))
+            rel = '*** Begin Patch\n*** Update File: master.json\n*** End Patch'
+            self.assertIn('岗位交接/master.json', hook.tool_violation(cfg, {'tool_name': 'apply_patch', 'tool_input': rel, 'cwd': str(root / '岗位交接')}, root))
+            self.assertIsNone(hook.tool_violation(cfg, {'tool_name': 'apply_patch', 'tool_input': rel, 'cwd': str(root / 'tests')}, root))
+
 
 class LabelGroupTests(unittest.TestCase):
     def test_rules_text_and_guard_cover_every_label_group(self):

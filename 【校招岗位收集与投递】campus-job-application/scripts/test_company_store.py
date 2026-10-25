@@ -278,15 +278,33 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual(C.content_sha(after), C.content_sha(before))
         self.assertIsNone(C.verify_handoff(after))
         self.assertNotEqual(self.run_cmd('forward', ok=False).returncode, 0)
-        # Repair the prior implementation's premature closed state without
-        # changing selections, user authority, or already-written master values.
-        after['state'] = '已回写'
-        (self.root / '岗位交接/投递批次.json').write_text(json.dumps(after), encoding='utf-8')
-        got = self.run_cmd('reverse-confirm', '--quote', '确认这一条')
-        self.assertEqual((got['state'], got['statusChanges']), ('进行中', 0))
+        # A batch outside 等待反向评审 cannot be re-confirmed; there is no
+        # standing repair path for earlier implementations.
+        self.assertNotEqual(self.run_cmd('reverse-confirm', '--quote', '再确认', ok=False).returncode, 0)
         self.outcome('jia|778899', 'submission_confirmed', '游戏产品', 'https://game.jia.example.cn/job/778899', '778899')
         self.run_cmd('reverse')
         self.assertEqual(self.run_cmd('reverse-confirm', '--quote', '确认最后一条')['state'], '已回写')
+
+
+    def test_confirmations_are_kept_per_scope(self):
+        self.set_order(('AI产品经理', 1), ('游戏产品', 2))
+        self.run_cmd('forward')
+        self.run_cmd('forward-confirm', '--quote', '确认这批')
+        preview = self.run_cmd('amend-materials')
+        self.run_cmd('amend-materials', '--expected-sha', preview['previousContentSha256'], '--quote', '补上推荐码')
+        b = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
+        c = b['confirmation']
+        self.assertEqual((c['userQuote'], c['scope']), ('补上推荐码', 'materials_only'))
+        self.assertEqual(c['scopes']['selection']['userQuote'], '确认这批')
+        self.assertEqual(c['scopes']['materials']['userQuote'], '补上推荐码')
+        self.assertEqual(c['scopes']['materials']['previousContentSha256'], preview['previousContentSha256'])
+        self.assertIsNone(C.verify_handoff(b))
+        preview = self.run_cmd('amend-materials')
+        self.run_cmd('amend-materials', '--expected-sha', preview['previousContentSha256'], '--quote', '再补一次')
+        c = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))['confirmation']
+        self.assertEqual(c['scopes']['selection']['userQuote'], '确认这批')
+        self.assertEqual(c['scopes']['materials']['userQuote'], '再补一次')
+        self.assertEqual(set(c['scopes']), {'selection', 'materials'})
 
 
 if __name__ == '__main__':
