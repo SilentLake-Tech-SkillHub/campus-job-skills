@@ -1245,7 +1245,7 @@ def link_exception(ctx, items, quote, preview=False):
             'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
 
 
-def relink(ctx, items, quote, preview=False):
+def relink(ctx, items, quote, preview=False, allow_in_batch=False):
     """更换已有岗位行的岗位链接。岗位链接是行身份的一部分，所以换链接不走 upsert：
     preview 只返回给用户看的逐行“岗位链接 X → Y”，不改任何文件；用户确认后带原话执行——
     改链接与超链接；把该行的确认记录迁到新业务键；登记身份变更（写 Excel 时据此认出同一行，状态不变、无需重新确认）；
@@ -1282,13 +1282,13 @@ def relink(ctx, items, quote, preview=False):
         in_batch = bool(batch) and old and any(
             c.get('公司') == old_key['company'] and str(r.get('岗位链接') or '').rstrip('/') == old.rstrip('/')
             for c in batch.get('companies', []) for r in c.get('岗位', []))
-        if in_batch and batch.get('state') in HANDED_OFF:
+        if in_batch and batch.get('state') in HANDED_OFF and not allow_in_batch:
             raise SystemExit(f"{describe(old_key)} 在已交接的投递批次 {batch.get('batchId')} 中（{batch.get('state')}），"
                              '须先完成投递与反向评审再换链接')
         new_key = {**old_key, 'link': new}
         line = (f"{describe(old_key)}：岗位链接「{old or '空'}」→「{new}」"
                 f"（投递状态「{status or '空'}」保持不变，志愿顺序等投递数据随行迁移）")
-        if in_batch:
+        if in_batch and not allow_in_batch:
             line += f"；该岗位在待评审批次 {batch.get('batchId')} 中，换链接后须重新生成批次（forward）"
         plan.append((s, idx, row, old_key, new_key, new, line))
         lines.append(line)

@@ -287,6 +287,7 @@ class CompanyStoreTests(unittest.TestCase):
 
 
     def test_confirmations_are_kept_per_scope(self):
+        self.run_cmd('refresh')
         self.set_order(('AI产品经理', 1), ('游戏产品', 2))
         self.run_cmd('forward')
         self.run_cmd('forward-confirm', '--quote', '确认这批')
@@ -306,6 +307,63 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual(c['scopes']['materials']['userQuote'], '再补一次')
         self.assertEqual(set(c['scopes']), {'selection', 'materials'})
 
+    def test_forward_checks_role_link_against_company_entry_config(self):
+        self.set_order(('AI产品经理', 1), ('游戏产品', 2))
+        folder = self.root / '岗位交接/公司/中国大陆/甲公司'
+        entry = {'kind': 'declarative_transition', 'target': 'same',
+                 'detail': {'location': {'pathnamePattern': '^/job/detail$', 'query': {'jobAdId': '$roleId'}}},
+                 'form': {'location': {'pathnamePattern': '^/form$', 'query': {'jobAdId': '$roleId'}}}}
+        (folder / '登录.json').write_text(json.dumps({'origin': 'https://jia.jobs.example.cn', 'entry': entry}), encoding='utf-8')
+        self.run_cmd('forward')
+        b = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
+        reasons = [e['原因'] for e in b['excluded'] if e.get('岗位') == 'AI产品经理']
+        self.assertTrue(reasons and '入口配置' in reasons[0], reasons)
+
+    def test_observed_link_change_overwrites_the_master_link_and_syncs_the_running_batch(self):
+        self.run_cmd('refresh')
+        self.set_order(('AI产品经理', 1), ('游戏产品', 2))
+        self.run_cmd('forward')
+        self.run_cmd('forward-confirm', '--quote', '确认这批')
+        old, new = 'https://jia.jobs.example.cn/campus/position/123456/detail', 'https://jia.jobs.example.cn/job/detail?jobAdId=G-777'
+        doc = json.loads((self.root / '岗位交接/公司/中国大陆/甲公司/公司.json').read_text(encoding='utf-8'))
+        cid = doc['companyId']
+        (self.root / '岗位交接/投递回传.json').write_text(json.dumps({'schemaVersion': 1, 'roles': {}, 'linkChanges': {
+            f'{cid}|123456': {'companyId': cid, 'roleId': '123456', 'roleUrl': old, 'roleTitle': 'AI产品经理', 'observedUrl': new,
+                              'observedAt': '2026-10-26T00:00:00Z', 'evidence': 'entry_transition_detail_page_verified'}}}), encoding='utf-8')
+        preview = self.run_cmd('relink-observed')
+        self.assertTrue(any(old in l and new in l for l in preview['show_user_exactly']))
+        self.assertTrue(any('岗位ID「123456」→「G-777」' in l for l in preview['show_user_exactly']))
+        self.assertNotEqual(self.run_cmd('relink-observed', '--quote', '可以', '--expected-sha', 'wrong', ok=False).returncode, 0)
+        self.run_cmd('relink-observed', '--quote', '同意换链接', '--expected-sha', preview['previousContentSha256'])
+        m = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
+        dump = json.dumps(m, ensure_ascii=False)
+        self.assertIn(new, dump)
+        self.assertNotIn('campus/position/123456', dump)
+        b = json.loads((self.root / '岗位交接/投递批次.json').read_text(encoding='utf-8'))
+        role = [r for c in b['companies'] for r in c['岗位'] if r['岗位名称'] == 'AI产品经理'][0]
+        self.assertEqual((role['岗位链接'], role['岗位ID']), (new, 'G-777'))
+        self.assertEqual(b['confirmation']['scopes']['selection']['userQuote'], '确认这批')
+        self.assertEqual(b['confirmation']['scopes']['links']['userQuote'], '同意换链接')
+        self.assertIsNone(C.verify_handoff(b))
+        self.assertIn(f'{cid}|G-777', b['progress']['remainingRoleKeys'] if 'progress' in b else [f'{cid}|G-777'])
+        doc = json.loads((self.root / '岗位交接/公司/中国大陆/甲公司/公司.json').read_text(encoding='utf-8'))
+        r = [x for x in doc['roles'] if x['主表行身份']['title'] == 'AI产品经理'][0]
+        self.assertEqual((r['岗位ID'], r['主表行身份']['link'], r.get('顺序')), ('G-777', new, 1))
+        self.assertFalse((self.root / '岗位交接/投递回传.json').exists())
+
+    def test_reverse_confirm_keeps_pending_link_change_proposals(self):
+        self.run_cmd('refresh')
+        self.set_order(('AI产品经理', 1), ('游戏产品', 2))
+        self.run_cmd('forward')
+        self.run_cmd('forward-confirm', '--quote', '确认交接')
+        self.outcome('jia|123456', 'submission_confirmed', 'AI产品经理', 'https://jia.jobs.example.cn/campus/position/123456/detail', '123456')
+        f = self.root / '岗位交接/投递回传.json'
+        d = json.loads(f.read_text(encoding='utf-8'))
+        d['linkChanges'] = {'jia|778899': {'companyId': 'jia', 'roleId': '778899', 'roleUrl': 'https://game.jia.example.cn/job/778899', 'roleTitle': '游戏产品', 'observedUrl': 'https://game.jia.example.cn/job/detail?jobAdId=X-1'}}
+        f.write_text(json.dumps(d), encoding='utf-8')
+        self.run_cmd('reverse')
+        self.run_cmd('reverse-confirm', '--quote', '确认这一条')
+        self.assertIn('jia|778899', json.loads(f.read_text(encoding='utf-8'))['linkChanges'])
 
 if __name__ == '__main__':
     unittest.main()

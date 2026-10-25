@@ -65,6 +65,48 @@ def material_definitions():
     return json.loads(MATERIAL_DEFINITIONS_FILE.read_text(encoding='utf-8'))['materials']
 
 
+def _location_matches(spec, url, role_id):
+    """与投递组件 transitionLocationMatches 同一规则：路径正则 + 查询参数（$roleId 按岗位取值）。"""
+    from urllib.parse import urlparse, parse_qs
+    try:
+        u = urlparse(str(url or ''))
+    except ValueError:
+        return False
+    hp, _, hq = u.fragment.partition('?')
+    if not spec or not re.search(spec.get('pathnamePattern') or r'^$', u.path):
+        return False
+    if spec.get('hashPathPattern') and not re.search(spec['hashPathPattern'], hp):
+        return False
+    for mapping, query in ((spec.get('query'), u.query), (spec.get('hashQuery'), hq)):
+        params = parse_qs(query, keep_blank_values=True)
+        for k, v in (mapping or {}).items():
+            want = role_id if v == '$roleId' else v
+            if want is None or params.get(k) != [str(want)]:
+                return False
+    return True
+
+
+def entry_link_problem(folder, item):
+    """组批时核对：该公司声明式入口能否认出这个岗位（岗位链接或投递链接之一）。"""
+    links = [item.get('岗位链接'), item.get('投递链接')]
+    entries = []
+    for f in sorted(Path(folder).glob('登录*.json')):
+        try:
+            e = json.loads(f.read_text(encoding='utf-8')).get('entry') or {}
+        except (OSError, ValueError):
+            continue
+        if e.get('kind') == 'declarative_transition':
+            entries.append(e)
+    if not entries:
+        return None
+    for e in entries:
+        for phase in ('detail', 'form'):
+            spec = (e.get(phase) or {}).get('location')
+            if any(_location_matches(spec, l, item.get('岗位ID')) for l in links if l):
+                return None
+    return '岗位链接与公司入口配置不匹配（入口认不出这个岗位）；若网站已改链接，先由投递端提出链接变更、经你确认后用 relink-observed 覆盖，或重新采集入口'
+
+
 def role_materials(values, master_hash):
     """Freeze applicable role materials from their sole master row, not company.json."""
     items = []
@@ -342,6 +384,10 @@ class Store:
                     item['顺序'] = stored['顺序']
                 if stored.get('投递链接'):  # 投递组件进入申请页后写回的申请页链接：下批直接从申请页进入
                     item['投递链接'] = stored['投递链接']
+                entry_problem = entry_link_problem(folder, item)
+                if entry_problem:
+                    excluded.append({'公司': name, '地区': sheet, '岗位': item['岗位名称'], '原因': entry_problem})
+                    continue
                 ok.append(item)
             bad = self.order_problems(ok)
             for g, orders in bad.items():
@@ -438,6 +484,79 @@ class Store:
         return {'batchId': b['batchId'], 'state': b['state'], 'show_user_exactly': lines,
                 'notes': [n['title'] + '：' + n['说明'] for n in notes], 'review': '岗位交接/反向评审.html'}
 
+    def relink_observed(self, quote=None, expected_sha=None):
+        """投递端发现岗位链接已变（网站跳转或改链接）时的唯一更新路径：预览“岗位链接 X → Y”，
+        用户确认后用 relink 覆盖主表链接（旧链接只留 git 历史），refresh 按新链接重算岗位ID；
+        岗位在当前批次时同步改批次（链接作用域确认），执行端须重新导入队列。"""
+        f = _outcome_file(self)
+        out = json.loads(f.read_text(encoding='utf-8')) if f.exists() else {'schemaVersion': 1, 'roles': {}}
+        proposals = out.get('linkChanges') or {}
+        if not proposals:
+            return {'show_user_exactly': [], 'note': '没有待确认的链接变更'}
+        docs = {}
+        for cf in self.base.glob('*/*/公司.json'):
+            d = json.loads(cf.read_text(encoding='utf-8'))
+            docs[d['companyId']] = d
+        b = self.batch()
+        active = b if b and b.get('state') in ('已交接', '进行中', '等待反向评审') else None
+        items, lines, batch_edits = [], [], []
+        for key, p in sorted(proposals.items()):
+            d = docs.get(p['companyId'])
+            hit = [r['主表行身份'] for r in (d or {}).get('roles', [])
+                   if str((r.get('主表行身份') or {}).get('link') or '').rstrip('/') == str(p['roleUrl']).rstrip('/')]
+            if len(hit) != 1:
+                raise SystemExit(f"链接变更 {key} 对不上主表岗位（主表链接可能已改），请人工核对")
+            items.append({**{k: v for k, v in hit[0].items() if k != 'placeholder'}, 'new_link': p['observedUrl']})
+            new_id = self.role_id(p['observedUrl'])
+            if not new_id:
+                raise SystemExit(f"新链接里没有官方岗位ID：{p['observedUrl']}")
+            if active:
+                for c in active['companies']:
+                    for r in c['岗位']:
+                        if c['companyId'] == p['companyId'] and str(r['岗位链接']).rstrip('/') == str(p['roleUrl']).rstrip('/'):
+                            batch_edits.append((c, r, p['observedUrl'], new_id))
+                            lines.append(f"批次 {active['batchId']}：{c['公司']}｜{r['岗位名称']} 岗位链接「{r['岗位链接']}」→「{p['observedUrl']}」，岗位ID「{r['岗位ID']}」→「{new_id}」（批次登记链接作用域确认，执行端须重新导入队列）")
+        preview = S.relink(self.ctx, items, None, preview=True, allow_in_batch=True)
+        prior_sha = content_sha(active) if active and batch_edits else None
+        shown = preview['show_user_exactly'] + lines
+        if quote is None:
+            return {'show_user_exactly': shown, 'previousContentSha256': prior_sha,
+                    'rule': '原样展示给用户并取得明确确认后，带 --quote 与 --expected-sha 执行'}
+        if not quote.strip() or (prior_sha and expected_sha != prior_sha):
+            raise SystemExit('必须附用户确认原话，以及预览时的批次摘要')
+        S.relink(self.ctx, items, quote.strip(), allow_in_batch=True)
+        self.refresh()
+        renamed = {}
+        if batch_edits:
+            master = self.ctx.load_master()
+            rows = self.master_rows(master)
+            for c, r, new_link, new_id in batch_edits:
+                old_key = c['companyId'] + '|' + str(r['岗位ID'])
+                hits = [x for x in rows.get((c['地区'], c['公司']), []) if x['kind'] == 'role'
+                        and x['values'].get(S.LINK_COL) == new_link and x['values'].get(S.NAME_COL) == r['岗位名称']]
+                if len(hits) != 1:
+                    raise SystemExit('换链接后主表岗位无法唯一对应，批次未改')
+                r['岗位链接'], r['岗位ID'] = new_link, new_id
+                r['materials'] = role_materials(hits[0]['values'], master['data_sha256'])
+                renamed[old_key] = c['companyId'] + '|' + new_id
+            prog = active.get('progress') or {}
+            for k in ('processedOutcomeKeys', 'remainingRoleKeys'):
+                if k in prog:
+                    prog[k] = sorted(renamed.get(x, x) for x in prog[k])
+            active['updatedAt'] = now()
+            set_confirmation(active, 'links', quote.strip(), active['updatedAt'], previousContentSha256=prior_sha)
+            S.save_json(self.batch_file, active)
+            self.review(active)
+            if verify_handoff(self.batch()):
+                raise ValueError('换链接后批次确认读回失败')
+        roles = {renamed.get(k, k): ({**v, 'roleId': renamed[k].split('|', 1)[1]} if k in renamed else v) for k, v in (out.get('roles') or {}).items()}
+        rest = {'schemaVersion': 1, 'roles': roles}
+        if roles:
+            S.save_json(f, rest)
+        elif f.exists():
+            f.unlink()
+        return {'relinked': len(items), 'batchUpdated': bool(batch_edits), 'show_user_exactly': shown}
+
     def reverse_confirm(self, quote, resolved=()):
         """用户确认后：写主表状态（经 json_excel_sync 确认台账），清除已处理的回传；全部处理完批次 → 已回写。"""
         if not quote or not quote.strip():
@@ -453,8 +572,9 @@ class Store:
         done = {i['outcomeKey'] for i in items} | {n['key'] for n in notes if n['event'] not in UNRESOLVED} | set(resolved)
         left = {k: v for k, v in roles.items() if k not in done}
         f = _outcome_file(self)
-        if left:
-            S.save_json(f, {'schemaVersion': 1, 'roles': left})
+        link_changes = (json.loads(f.read_text(encoding='utf-8')).get('linkChanges') or {}) if f.exists() else {}
+        if left or link_changes:  # 链接变更提议另走 relink-observed，反向评审不得清掉
+            S.save_json(f, {'schemaVersion': 1, 'roles': left, **({'linkChanges': link_changes} if link_changes else {})})
         elif f.exists():
             f.unlink()
         processed = set(b.get('progress', {}).get('processedOutcomeKeys', [])) | done
@@ -544,7 +664,7 @@ def _reverse_items(st):
 # 确认按作用域保存：选岗（selection）与补材料（materials）各留最新一条，互不覆盖。
 # 顶层 userQuote/confirmedAt/contentSha256 是当前生效的门禁（最近一次确认），供投递端核对；
 # 顶层 scope 沿用投递端约定：materials 作用域写 'materials_only'。
-SCOPE_LABEL = {'selection': 'selection', 'materials': 'materials_only'}
+SCOPE_LABEL = {'selection': 'selection', 'materials': 'materials_only', 'links': 'links_only'}
 
 
 def set_confirmation(b, scope, quote, at, **extra):
@@ -587,6 +707,9 @@ def main():
     p = sub.add_parser('amend-materials')
     p.add_argument('--quote', help='不传则仅预览；传用户明确授权原话后只补当前岗位材料')
     p.add_argument('--expected-sha', help='预览返回的 previousContentSha256')
+    p = sub.add_parser('relink-observed')
+    p.add_argument('--quote', help='不传则仅预览；传用户确认原话后覆盖主表链接并同步批次')
+    p.add_argument('--expected-sha', help='预览返回的 previousContentSha256（岗位在当前批次时必填）')
     p = sub.add_parser('set-order')
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link|title,顺序}]，同公司同分组一次给全')
     p.add_argument('--quote', required=True, help='用户给定顺序的原话')
@@ -608,6 +731,9 @@ def main():
     elif a.cmd == 'amend-materials':
         with S.exclusive(st.ctx):
             out = st.amend_materials(a.quote, a.expected_sha)
+    elif a.cmd == 'relink-observed':
+        with S.exclusive(st.ctx):
+            out = st.relink_observed(a.quote, a.expected_sha)
     elif a.cmd == 'set-order':
         with S.exclusive(st.ctx):
             out = st.set_order(json.loads(Path(a.input).read_text(encoding='utf-8')), a.quote)

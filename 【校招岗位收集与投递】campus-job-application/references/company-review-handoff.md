@@ -10,7 +10,9 @@
 4. 把评审页给用户看；用户明确确认后 `company_store.py forward-confirm --quote "<用户原话>"`（登记原话与内容摘要，批次 → 已交接）。
 5. 投递组件的 `role_queue_import` / `company_batch_create` 只读取已交接且确认后未被改动的批次；Hook 同样拦截未确认的批次。上一批未完成反向评审前不能生成下一批。
 
-材料种类只在 `references/role-materials.json` 定义（主表列、分隔符、“明确没有”的写法、取值格式），key 与投递组件 `catalog/role-materials.json` 一致；新增材料两边各加一项。组批同时生成每岗位 `materials` 契约：推荐码原文、解析值、来源主表行链接/列/Hash与“有则必填”条件。没有代码与待核实分别标识，个人主档和公司配置不复制代码。正向确认再次对照主表，漏材料或来源变化拒绝确认。
+材料种类只在 `references/role-materials.json` 定义（主表列、分隔符、“明确没有”的写法、取值格式），key 与投递组件 `catalog/role-materials.json` 一致；新增材料两边各加一项。组批时还核对入口：公司有声明式入口配置时，岗位链接或`投递链接`之一必须能被它识别，否则不进批次并列出原因。每个岗位只有一个岗位链接（主表），不另存第二个链接或第二套ID。投递端发现网站跳转/改链接时把提议写进 `投递回传.json` 的 `linkChanges`；`company_store.py relink-observed` 预览“岗位链接 X → Y”，用户确认后用 `relink` 覆盖主表（旧链接只留 git 历史），`refresh` 重算岗位ID；岗位在当前批次时同步改批次并登记“链接”作用域确认，执行端须重新导入队列。反向评审不会清掉待确认的链接变更。
+
+组批同时生成每岗位 `materials` 契约：推荐码原文、解析值、来源主表行链接/列/Hash与“有则必填”条件。没有代码与待核实分别标识，个人主档和公司配置不复制代码。正向确认再次对照主表，漏材料或来源变化拒绝确认。
 
 确认按作用域保存：`confirmation.scopes.selection`（正向评审确认选岗）与 `confirmation.scopes.materials`（补充材料确认）各保留最新一条，互不覆盖；顶层 `userQuote/confirmedAt/contentSha256/scope` 是当前生效的门禁，即最近一次确认。确认后的任何局部变更都必须声明自己的作用域，只改该作用域字段，只让依赖它的冻结状态失效，并保留其他作用域的确认原话。
 
