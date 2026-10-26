@@ -507,6 +507,8 @@ class Store:
             if len(hit) != 1:
                 raise SystemExit(f"链接变更 {key} 对不上主表岗位（主表链接可能已改），请人工核对")
             items.append({**{k: v for k, v in hit[0].items() if k != 'placeholder'}, 'new_link': p['observedUrl']})
+            if p.get('evidence') == 'derived_from_application_page':
+                lines.append(f"{key}：新链接是从已打开的申请页推出来的，还没在详情页核实过；确认后下次从这个链接进入时会在详情页核对岗位")
             new_id = self.role_id(p['observedUrl'])
             if not new_id:
                 raise SystemExit(f"新链接里没有官方岗位ID：{p['observedUrl']}")

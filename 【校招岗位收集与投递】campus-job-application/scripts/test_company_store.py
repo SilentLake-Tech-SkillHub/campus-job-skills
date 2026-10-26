@@ -351,6 +351,17 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual((r['岗位ID'], r['主表行身份']['link'], r.get('顺序')), ('G-777', new, 1))
         self.assertFalse((self.root / '岗位交接/投递回传.json').exists())
 
+    def test_derived_link_change_is_labelled_in_the_preview(self):
+        self.run_cmd('refresh')
+        doc = json.loads((self.root / '岗位交接/公司/中国大陆/甲公司/公司.json').read_text(encoding='utf-8'))
+        cid = doc['companyId']
+        old, new = 'https://jia.jobs.example.cn/campus/position/123456/detail', 'https://jia.jobs.example.cn/job/detail?jobAdId=G-777'
+        (self.root / '岗位交接/投递回传.json').write_text(json.dumps({'schemaVersion': 1, 'roles': {}, 'linkChanges': {
+            f'{cid}|123456': {'companyId': cid, 'roleId': '123456', 'roleUrl': old, 'roleTitle': 'AI产品经理', 'observedUrl': new,
+                              'observedAt': '2026-10-26T00:00:00Z', 'evidence': 'derived_from_application_page'}}}), encoding='utf-8')
+        preview = self.run_cmd('relink-observed')
+        self.assertTrue(any('还没在详情页核实' in l for l in preview['show_user_exactly']))
+
     def test_reverse_confirm_keeps_pending_link_change_proposals(self):
         self.run_cmd('refresh')
         self.set_order(('AI产品经理', 1), ('游戏产品', 2))
