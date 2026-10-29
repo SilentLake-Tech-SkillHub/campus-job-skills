@@ -17,11 +17,11 @@ PATCH_HEADERS = re.compile(r'^\*\*\* (?:(?:Update|Add|Delete) File|Move to): *(.
 READ_TOOLS = {'read', 'read_file', 'readfile', 'view_image', 'get_file', 'open_file'}
 EDIT_TOOLS = {'write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch', 'create_file', 'notebookedit'}
 SHELL_TOOLS = {'bash', 'shell', 'exec', 'exec_command', 'execute_command', 'run_command', 'terminal'}
-DISPLAY = {'echo', 'printf', 'true', 'false', 'pwd', 'date', 'which', 'command', 'ls', 'stat', 'find'}
-READ_COMMANDS = {'cat', 'head', 'tail', 'less', 'more', 'xxd', 'hexdump', 'strings', 'file'}
+DISPLAY = {'echo', 'printf', 'true', 'false', 'pwd', 'date', 'which', 'command', 'ls', 'stat'}
+READ_COMMANDS = {'cat', 'head', 'tail', 'less', 'more', 'xxd', 'hexdump', 'strings', 'file', 'jq', 'wc', 'diff'}
 LITERAL = r'''("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')'''
 TEXT_TOOLS = {'request_user_input', 'request_user_input_async', 'send_message', 'send_message_to_thread',
-              'notify', 'text'}
+              'notify', 'text', 'askuserquestion', 'sendusermessage'}
 
 
 @dataclass(frozen=True)
@@ -227,6 +227,45 @@ def _subcommands(command):
 
 
 
+def _find_effects(args, cwd, registered):
+    """Listing names is metadata; deleting/executing is not a read-only find."""
+    roots, i = [], 0
+    while i < len(args):
+        arg = args[i]
+        if arg in {'-H', '-L', '-P', '-X', '-s', '-d'} or re.fullmatch(r'-O\d+', arg):
+            i += 1; continue
+        if arg == '-D':
+            i += 2; continue
+        if arg == '-f' and i + 1 < len(args):
+            roots.append(args[i + 1]); i += 2; continue
+        if arg.startswith('-') or arg in {'!', '('}: break
+        roots.append(arg); i += 1
+    paths = [p for value in (roots or ['.']) if (p := path_at(value, cwd)) is not None]
+    out = []
+    if '-delete' in args:
+        out.extend(Effect('delete', p, tree=True) for p in paths)
+    actions = {'-exec', '-execdir', '-ok', '-okdir'}.intersection(args)
+    if actions:
+        reason = 'find 含执行动作 ' + '、'.join(sorted(actions)) + '，无法确定每个匹配项的实际文件操作'
+        out.extend(Effect('unknown', p, tree=True, reason=reason) for p in paths)
+        # An invoked command can touch a literal file outside find's roots.
+        out.extend(mentioned(args, cwd, registered, reason))
+    for i, arg in enumerate(args):
+        if arg in {'-fprint', '-fprint0', '-fprintf', '-fls', '-files0-from'} and i + 1 < len(args):
+            p = path_at(args[i + 1], cwd)
+            if p is not None:
+                out.append(Effect('read' if arg == '-files0-from' else 'write', p))
+    return out
+
+
+def _read_operands(name, args):
+    paths = [a for a in args if not a.startswith('-')]
+    file_options = {'jq': {'--from-file'}, 'wc': {'--files0-from'},
+                    'diff': {'--from-file', '--to-file'}}.get(name, set())
+    paths.extend(a.split('=', 1)[1] for a in args if '=' in a and a.split('=', 1)[0] in file_options)
+    return paths
+
+
 def shell_effects(command, cwd, root, registered=(), sync_script=None):
     out = []
     for sub in _subcommands(command): out.extend(shell_effects(sub, cwd, root, registered, sync_script))
@@ -298,9 +337,11 @@ def shell_effects(command, cwd, root, registered=(), sync_script=None):
                 p = path_at(arg, cwd)
                 if p is not None: out.append(Effect('unknown', p))
             continue
+        if name == 'find':
+            out.extend(_find_effects(args, cwd, registered)); continue
         if name in DISPLAY: continue
         if name in READ_COMMANDS:
-            out += [Effect('read', p) for a in plain if (p := path_at(a, cwd)) is not None]
+            out += [Effect('read', p) for a in _read_operands(name, args) if (p := path_at(a, cwd)) is not None]
         elif name in {'cp', 'mv', 'rsync', 'ditto', 'install'} and len(plain) >= 2:
             recursive = any(a in {'-r', '-R', '-a', '--recursive'} for a in args)
             destination = path_at(plain[-1], cwd)
