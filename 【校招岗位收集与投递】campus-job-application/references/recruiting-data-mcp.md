@@ -12,11 +12,15 @@
 | `recruiting_status_check` | `check` | 只读：标签、字段、名额表、未确认状态变更、JSON 与 Excel 差异 |
 | `recruiting_status_propose` | `propose` | 只读：生成“当前状态是X，更新状态是Y”（含名额收口行），必须原样给用户看 |
 | `recruiting_status_confirm` | `confirm` | 用户明确确认后执行，记用户原话到确认台账并改主数据 |
-| `recruiting_rows_upsert` | `upsert` | 新增岗位行或改非状态字段；整行过字段门禁（岗位名称不得含“志愿”等）；不能更换已有岗位的链接 |
+| `recruiting_rows_upsert` | `upsert` | 新增岗位行（`{sheet, company, role:'new'}`，分配岗位编码与站点编码；链接已在表里时拒绝并报出已有编码）或按编码改非状态字段；整行过字段门禁；不能改编码列、投递链接、志愿顺序，不能更换已有岗位的链接 |
 | `recruiting_link_exception_preview` | `link-exception --preview` | 只读：官网无独立详情页时，登记或撤销链接例外前生成备注“当前 → 更新”，必须原样给用户看 |
 | `recruiting_link_exception_confirm` | `link-exception --quote` | 用户确认后写固定格式的链接例外备注并记入台账；forward 据此只免“列表页”检查 |
-| `recruiting_link_change_preview` | `relink --preview` | 只读：更换已有岗位链接前生成“岗位链接 X → Y”，必须原样给用户看 |
-| `recruiting_link_change_confirm` | `relink --quote` | 用户确认后换链接：状态不变、无需重新确认，确认记录、志愿顺序等投递数据随行迁移；岗位在已交接批次中时拒绝 |
+| `recruiting_link_change_preview` | `relink --preview` | 只读：按岗位编码更换已有岗位链接前生成“岗位链接 X → Y”，必须原样给用户看 |
+| `recruiting_link_change_confirm` | `relink --quote` | 用户确认后换链接：岗位编码不变，状态、确认记录、志愿顺序都挂在编码上不动；新域名挂新站点并清空旧投递链接；岗位在已交接批次中时拒绝（走 `apply-observations`） |
+| `recruiting_apply_link_preview` | `set-apply-link --preview` | 只读：按岗位编码设置或清空投递链接（须与岗位站点同域），生成“投递链接 X → Y” |
+| `recruiting_apply_link_confirm` | `set-apply-link --quote` | 用户确认后写投递链接 |
+| `recruiting_site_links_preview` | `set-site-links --preview` | 只读：按站点编码设置登录链接、账号核对页（核对页不能为空），生成“当前 → 更新” |
+| `recruiting_site_links_confirm` | `set-site-links --quote` | 用户确认后写站点链接 |
 | `recruiting_json_write_excel` | `write` | 唯一写 Excel 的入口，写后逐格读回 |
 | `recruiting_sync_pending` | `pending` / `diff` | 是否有未写入 Excel 的改动及逐格差异 |
 | `recruiting_write_defer` | `defer` | 用户选择“下一轮再写入”时登记原话 |

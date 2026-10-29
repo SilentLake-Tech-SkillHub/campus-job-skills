@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_payload import (call_parts, _session, PROMPT_KEYS, _prompt, QUESTION_REPLY_TAG, QUESTION_REPLY,
                           QUESTION_CALL_ID, _approval_prompts)
+from hook_file_policy import file_effects, path_at, touches, mentioned
 
 SCRIPT = Path(__file__).with_name('json_excel_sync.py')
 EDIT_TOOL = re.compile(r'(write|edit|patch|replace|create|insert|notebook)', re.I)
@@ -68,10 +69,10 @@ def label_groups(root, cfg):
 
 
 def protected(cfg):
-    batch = (cfg.get('companyStore') or {}).get('batchFile', '岗位交接/投递批次.json')
-    # 投递批次只由 company_store.py 写；投递回传只由投递组件的 application_closeout 写
+    base = (cfg.get('companyStore') or {}).get('dir', '岗位交接/公司')
+    # 公司宽表文件只由 company_store.py 生成；投递回传只由投递组件写入、company_store.py 消费
     return [cfg['workbook'], cfg['masterData'], cfg['confirmationLedger'], LABELS_FILE, *cfg.get('labelGroups', []),
-            batch, str(Path(batch).with_name('投递回传.json')), '产品管理/user_applicaiton_requirements_temp.json',
+            base + '/', str(Path(base).with_name('投递回传.json')), '产品管理/user_applicaiton_requirements_temp.json',
             '.runtime/user_application_requirements_state.json']
 
 
@@ -115,8 +116,8 @@ def rules_text(cfg, root=None):
             '1. 投递状态只能是标签组文件中的标签（一组一个文件：岗位组 产品管理/投递状态标签.json，其它组见其 labelGroups），每行有且只有一个、不得为空、不得追加说明；标签只能由固定脚本写入，写入前由脚本统一检查：\n'
             + '\n'.join(lines) + '\n'
             + '   公司行=岗位名称与岗位链接均为空的行；每家公司在其出现的每张地区表固定一行公司行，有没有岗位都保留，新增岗位不占用公司行。\n'
-            + '2. 主数据是 岗位交接/工作簿全量.json，与 Excel 完全对照。Excel 只给人看：AI 禁止读取或修改任何 .xlsx，只读 JSON；Excel 只能由 json_excel_sync.py write 从 JSON 写出，禁止绕过脚本改 JSON。\n'
-            '3. 任何状态变更：先 propose，把输出的“当前状态是X，更新状态是Y”原样给用户看，取得用户明确确认后才能 confirm（附用户原话）。已有岗位换链接只能用 relink（先 --preview 给用户看“岗位链接 X → Y”，确认后带原话执行），不能用 upsert 直接改。官网无独立详情页的岗位，链接例外备注只能用 link-exception 写（先 --preview 给用户看，确认后执行）。\n'
+            + '2. 主数据是 岗位交接/工作簿全量.json，与 Excel 完全对照。数据保护按框架现有清单的绝对路径判断，不按后缀匹配。登记工作簿不直接读取或改写；同步只认配置登记的实际脚本入口。数据保护不处理任何 Git 命令或纯文本问答；组件软锁独立判断。禁止绕过固定脚本改主数据 JSON。\n'
+            '3. 任何状态变更：先 propose，把输出的“当前状态是X，更新状态是Y”原样给用户看，取得用户明确确认后才能 confirm（附用户原话）。行一律按编码引用（岗位编码 J000001；公司行=地区表+公司编码 C00001）。岗位链接、投递链接、站点的登录链接/账号核对页只能用 relink / set-apply-link / set-site-links（先 --preview 给用户看，确认后带原话执行），不能用 upsert 直接改。官网无独立详情页的岗位，链接例外备注只能用 link-exception 写（先 --preview 给用户看，确认后执行）。\n'
             '4. 名额收口：用户的选择占满本轮名额后，同范围剩余“岗位待筛选”由 confirm 自动改为“岗位不符合用户要求”，并在 propose 中一并展示；名额未被用户选满前不得剔除任何岗位。\n'
             '5. 每次对话结束前，若 JSON 有未写入 Excel 的改动，必须问用户：现在写入 Excel，还是下一轮再写入；用户选现在写入则 write，选下一轮则 defer（附原话）。\n'
             '6. 记录唯一：每类信息只有一个存放位置、只保留最新一版，更新=覆盖原值；禁止追加“旧结论/历史研究记录”，禁止另存副本/历史/备份，禁止按批次另起同类文件；回滚靠 git。岗位交接/ 下只允许固定文件（见 AGENTS.md）。\n'
@@ -152,11 +153,17 @@ def handoff_violation(root, payload):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import company_store
     st = company_store.Store(root, '产品管理/投递状态标签.json')
-    problem = company_store.verify_handoff(st.batch())
-    return ('正向门禁：' + problem + '。请先运行 company_store.py forward 生成评审页，用户确认后 forward-confirm。') if problem else None
+    _, docs = st.round()
+    handed = {c: d for c, d in docs.items() if d['批次']['选中岗位']}
+    if not handed:
+        return '正向门禁：投递批次未经用户正向评审确认。请先运行 company_store.py forward 生成评审页，用户确认后 forward-confirm。'
+    for c, d in handed.items():
+        problem = company_store.verify_handoff(d)
+        if problem:
+            return f"正向门禁：{d['公司名称']}（{c}）{problem}。请先运行 company_store.py forward 生成评审页，用户确认后 forward-confirm。"
+    return None
 
 
-EXCEL = re.compile(r'\.xls[xm]?\b', re.I)
 PATCH_TARGET = re.compile(r'^\*\*\* (?:(?:Update|Add|Delete) File|Move to): *(.+?)\s*$', re.M)
 PATH_KEYS = ('file_path', 'path', 'notebook_path', 'filePath', 'TargetFile', 'AbsolutePath')
 
@@ -174,19 +181,35 @@ def write_targets(ti):
     return None
 
 
-def excel_violation(payload):
-    """Excel 只给人看：任何 Agent 不得以任何方式读取或改写 .xlsx，唯一放行固定写入脚本。"""
-    tool, ti = call_parts(payload)
-    raw = json.dumps(ti, ensure_ascii=False)
-    targets = write_targets(ti) if EDIT_TOOL.search(tool) else None
-    subject = ' '.join(targets) if targets is not None else raw
-    if EXCEL.search(subject) and 'json_excel_sync.py' not in subject:
-        return ('Excel 门禁：Excel 只给人看，AI 禁止读取或修改任何 .xlsx。请改读 岗位交接/工作簿全量.json'
-                '（与 Excel 完全对照的主数据）；写 Excel 只能用 json_excel_sync.py write。')
+def data_effects(cfg, payload, root):
+    """Consume the framework's existing protected(cfg) list; no shadow manifest."""
+    registered = [str(path_at(p.rstrip('/'), root)) + ('/' if p.endswith('/') else '') for p in protected(cfg)]
+    script = path_at(cfg.get('syncScript') or str(SCRIPT), root)
+    try:
+        return file_effects(payload, root, registered, script)
+    except (ValueError, TypeError, OSError, SyntaxError) as error:
+        _, args = call_parts(payload)
+        return mentioned(args, payload.get('cwd') or root, registered, '工具解析失败：' + type(error).__name__)
+
+
+def data_reason(rule, detail, action):
+    return f'【数据文件保护：{rule}】Hook：{Path(__file__).resolve()}。{detail}。正确做法：{action}'
+
+
+def excel_violation(payload, cfg=None, root=None):
+    """The registered workbook is an object, not a file-extension pattern."""
+    if root is None or not cfg or not cfg.get('workbook'):
+        return None
+    book = path_at(cfg['workbook'], root)
+    hit = next((e for e in data_effects(cfg, payload, root) if touches(e, book)), None)
+    if hit:
+        return data_reason('登记工作簿', str(book) + '：' + (hit.reason or '不允许直接访问工作簿内容'),
+                           '读取主数据 JSON；同步工作簿使用配置登记的同步脚本。数据保护不处理 Git 命令')
     return None
 
 
-HANDOFF_ALLOWED = re.compile(r'^岗位交接/(工作簿全量\.json|投递批次\.json|正向评审\.html|投递回传\.json|反向评审\.html|公司/[^/]+/[^/]+/(公司|登录(@[^/]+)?|表单定义(@[^/]+)?)\.json)$')
+# 第 2 步完成前，原公司文件夹里的 登录/表单定义 配置仍在原位（只读）；公司宽表一家一份，以公司编码命名。
+HANDOFF_ALLOWED = re.compile(r'^岗位交接/(工作簿全量\.json|正向评审\.html|投递回传\.json|反向评审\.html|公司/C\d{5}\.json|公司/[^/]+/[^/]+/(登录(@[^/]+)?|表单定义(@[^/]+)?)\.json)$')
 STACK_NAME = re.compile(r'(^|/)(历史|备份|快照|存档)(/|$)|上一版|副本|[-_.]v\d+\.[A-Za-z]+$|\.(bak|orig)$')
 PATH_TOKEN = re.compile(r'[^\s\'"<>|;&()]*(?:岗位交接/|历史/|备份|快照|上一版|副本|\.bak)[^\s\'"<>|;&()]*')
 
@@ -194,16 +217,8 @@ PATH_TOKEN = re.compile(r'[^\s\'"<>|;&()]*(?:岗位交接/|历史/|备份|快照
 def stack_violation(root, payload):
     """记录唯一门禁：同一信息只保留最新一版、覆盖更新；不得在工作区另存副本/历史/备份，岗位交接/ 只允许固定文件。"""
     root = Path(root).resolve()
-    tool, ti = call_parts(payload)
-    if EDIT_TOOL.search(tool) and not (isinstance(ti, dict) and 'command' in ti):
-        targets = write_targets(ti) or []
-    elif SHELL_TOOL.search(tool) or isinstance(ti, dict) and 'command' in ti:
-        raw = ti.get('command') if isinstance(ti, dict) and isinstance(ti.get('command'), str) else json.dumps(ti, ensure_ascii=False)
-        if not SHELL_WRITE.search(raw):
-            return None
-        targets = [t for t in PATH_TOKEN.findall(raw) if ':' not in t.split('岗位交接/')[0]]
-    else:
-        return None
+    # Record uniqueness is a separate creation rule, not a shadow data list.
+    targets = [str(e.path) for e in file_effects(payload, root) if e.kind == 'write']
     bad = []
     for t in targets:
         t = str(t).strip().strip('\'"')
@@ -218,15 +233,19 @@ def stack_violation(root, payload):
             bad.append(r)
     if not bad:
         return None
-    return ('记录唯一门禁：同一信息只保留最新一版、覆盖原文件更新，禁止另存副本/历史/备份/按批次另起同类文件（回滚靠 git）。'
-            '岗位交接/ 下只允许 工作簿全量.json、投递批次.json、正向评审.html、投递回传.json、反向评审.html、公司/<地区>/<公司>/{公司.json,登录[@域名].json,表单定义[@域名].json}；'
-            '过程文件放工作区以外的临时目录，用完即删。被拦截：' + '、'.join(bad[:5]))
+    return data_reason('记录唯一门禁', ('同一信息只保留最新一版、覆盖原文件更新，禁止另存副本/历史/备份/按批次另起同类文件（回滚靠 git）。'
+            '岗位交接/ 下只允许 工作簿全量.json、正向评审.html、投递回传.json、反向评审.html、公司/<公司编码>.json（以及迁出前的 公司/<地区>/<公司>/{登录[@域名].json,表单定义[@域名].json}）；'
+            '被拦截：' + '、'.join(bad[:5])), '更新唯一原文件；过程文件放工作区外临时目录，用完删除')
 
 
 def tool_violation(cfg, payload, root=None):
     tool, ti = call_parts(payload)
     raw = json.dumps(ti, ensure_ascii=False)
     files = protected(cfg)
+    if root is not None:
+        effects = [e for e in data_effects(cfg, payload, root) if e.kind in {'write', 'delete', 'unknown'}]
+        return [f for f in files if any(touches(e, path_at(f.rstrip('/'), root))
+                or f.endswith('/') and path_at(f.rstrip('/'), root) in e.path.parents for e in effects)] or None
     targets = write_targets(ti) if EDIT_TOOL.search(tool) else None
     if targets is not None:
         # 按完整路径判断：相对路径以本次调用的 cwd 解析后与工作区内的受保护文件比较，
@@ -238,14 +257,22 @@ def tool_violation(cfg, payload, root=None):
             if root is not None:
                 p = Path(t) if Path(t).is_absolute() or t.startswith('/') else base / t
                 try:
-                    return p.resolve() == (Path(root).resolve() / f).resolve()
+                    target, guarded = p.resolve(), (Path(root).resolve() / f).resolve()
+                    return target == guarded or f.endswith('/') and guarded in target.parents
                 except OSError:
                     pass
-            return t == f or t.replace('\\', '/').endswith('/' + f)
+            t = t.replace('\\', '/')
+            return t == f or t.endswith('/' + f) or f.endswith('/') and (t.startswith(f) or '/' + f in t)
         return [f for f in files if any(hit(t, f) for t in targets)] or None
     if SHELL_TOOL.search(tool) and not EDIT_TOOL.search(tool) or isinstance(ti, dict) and 'command' in ti:
         hits = [f for f in files if f in raw or Path(f).name in raw]
-        if hits and 'json_excel_sync.py' not in raw and SHELL_WRITE.search(raw):
+        # 与组件软锁同一套写入判断：重定向、cp/mv/sed -i 等改写命令、python/node 内联写文件都算写入。
+        cmd = ti.get('command') if isinstance(ti, dict) and isinstance(ti.get('command'), str) else raw
+        writes = bool(SHELL_WRITE.search(raw) or INLINE_WRITE.search(raw))
+        if root is not None and not writes:
+            rels = _shell_targets(Path(root).resolve(), payload.get('cwd') or str(root), cmd)
+            writes = any(t and any(t == f.rstrip('/') or (f.endswith('/') and t.startswith(f)) for f in files) for t in rels)
+        if hits and 'json_excel_sync.py' not in raw and writes:
             if 'application_requirements.py' in raw:
                 hits = [f for f in hits if f not in ('产品管理/user_applicaiton_requirements_temp.json',
                                                     '.runtime/user_application_requirements_state.json')]
@@ -256,7 +283,7 @@ def tool_violation(cfg, payload, root=None):
         if targets is None:
             hits = [f for f in files if f in raw or Path(f).name in raw]
         else:
-            hits = [f for f in files if any(t == f or t.endswith('/' + f) or Path(t).name == Path(f).name for t in targets)]
+            hits = [f for f in files if any(t == f or t.endswith('/' + f) or (f.endswith('/') and f in t) or (not f.endswith('/') and Path(t).name == Path(f).name) for t in targets)]
         return hits or None
     return None
 
@@ -281,7 +308,7 @@ IN_PLACE = {'sed', 'perl', 'truncate', 'touch', 'chmod', 'chown', 'rm', 'rmdir',
 COPY = {'cp', 'mv', 'rsync', 'ditto'}
 GIT_MUTATE = {'checkout', 'restore', 'reset', 'apply', 'am', 'stash', 'clean', 'pull', 'merge', 'rebase', 'cherry-pick', 'rm', 'mv', 'switch', 'revert'}
 PKG_MUTATE = {'install', 'i', 'ci', 'uninstall', 'remove', 'update', 'add', 'upgrade'}
-INLINE_WRITE = re.compile(r'(write_text|write_bytes|open\([^)]*["\'][wax]b?\+?["\']|json\.dump\(|writeFile|appendFile|unlink|rmSync|shutil\.|os\.remove|os\.rename)')
+INLINE_WRITE = re.compile(r'(write_text|write_bytes|open\([^)]*["\'][wax]b?\+?["\']|json\.dump\(|writeFile|appendFile|unlink|rmSync|shutil\.|os\.remove|os\.rename|os\.replace|renameSync|copyFile|cpSync|createWriteStream|\.rename\(|truncateSync|openSync\([^)]*["\'][wa]\+?["\'])')
 
 
 def maintenance_on(root):
@@ -465,11 +492,16 @@ def main():
         return 0
     if event == 'PreToolUse':
         hits = tool_violation(cfg, payload, root)
-        reason = (excel_violation(payload) or component_violation(root, payload) or handoff_violation(root, payload)
-                  or stack_violation(root, payload))
-        if hits and not reason:
-            reason = ('投递状态门禁：禁止绕过固定脚本直接修改 ' + '、'.join(hits)
-                      + '。状态变更请走 json_excel_sync.py propose→用户确认→confirm；写 Excel 只能用 json_excel_sync.py write。')
+        data = excel_violation(payload, cfg, root)
+        component = component_violation(root, payload)
+        handoff = handoff_violation(root, payload)
+        unique = stack_violation(root, payload)
+        if hits and not data:
+            unknown = sorted({e.reason for e in data_effects(cfg, payload, root) if e.kind == 'unknown' and e.reason})
+            detail = '；'.join(unknown) if unknown else '禁止绕过固定入口直接改写'
+            data = data_reason('登记数据文件', detail + '；登记对象：' + '、'.join(hits),
+                               '使用框架固定写入命令；状态变更走 propose→用户确认→confirm；入口配置走 site-entry 预览→用户确认→写入')
+        reason = '\n'.join(r for r in (data, component, handoff, unique) if r)
         if reason:
             if a.host == 'agy':
                 emit({'decision': 'deny', 'reason': reason})
@@ -488,10 +520,11 @@ def main():
         if extra:
             notes.append(extra.strip())
         if quota.get('quota_full_but_unclosed'):
-            notes.append('名额已被用户选满但仍有岗位未收口：' + '；'.join(quota['quota_full_but_unclosed'][:5]))
+            notes.append('名额已被用户选满但仍有岗位未收口：' + '；'.join(quota['quota_full_but_unclosed'][:5])
+                         + '。请用 json_excel_sync.py propose 把收口变更原样给用户看并等待确认。')
         if notes:
-            emit({'decision': 'block', 'reason': '结束前必须处理：' + ' '.join(notes)
-                  + ' 请直接问用户：“JSON 有未写入 Excel 的改动，现在写入，还是下一轮再写入？”然后结束本轮等待回答。'})
+            ask = ' 请直接问用户：“JSON 有未写入 Excel 的改动，现在写入，还是下一轮再写入？”然后结束本轮等待回答。' if extra else ' 然后结束本轮等待回答。'
+            emit({'decision': 'block', 'reason': '结束前必须处理：' + ' '.join(notes) + ask})
             return 0
         emit({})
         return 0

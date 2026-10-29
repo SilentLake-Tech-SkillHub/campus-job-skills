@@ -12,6 +12,7 @@ SCRIPT = HERE / 'json_excel_sync.py'
 sys.path.insert(0, str(HERE))
 import workbook_store  # noqa: E402
 import json_excel_sync as S  # noqa: E402
+import master_codes as M  # noqa: E402
 
 HEAD = ['地区', '公司', '主要行业', '企业性质', '岗位名称', '工作地点', '岗位JD', '所属BU', '岗位链接', '投递状态', '备注']
 LABELS = [
@@ -51,9 +52,25 @@ class SyncTests(unittest.TestCase):
                "quotaRule": {"countsStatuses": ["岗位待投递", "岗位已投递"],
                              "autoCloseFrom": ["岗位待筛选"], "autoCloseTo": "岗位不符合用户要求"}}
         (self.root / '产品管理/labels.json').write_text(json.dumps(cfg, ensure_ascii=False), encoding='utf-8')
-        snap = workbook_store.snapshot(self.root / 'book.xlsx')
-        (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+        self.snapshot()
         self.run_cmd('set-quota-rules', '--input', self.items([self.quota(2)]))
+
+    def snapshot(self):
+        """Excel → 主数据快照，并给第一次出现的公司/岗位/站点分配编码（甲公司 C00001、乙公司 C00002，岗位按行序 J000001 起）。"""
+        snap = workbook_store.snapshot(self.root / 'book.xlsx')
+        M.assign_missing_codes(snap, ['中国大陆'])
+        S.refresh_digest(snap)
+        (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+
+    def master(self):
+        return json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
+
+    def code(self, i):
+        """产品经理i 的岗位编码（按岗位链接在测试里找一次，之后只用编码）。"""
+        s = self.master()['sheets'][0]
+        idx = S.headers(s)
+        return next(S.cell_value(r, idx['岗位编码']) for r in s['rows'] if S.cell_value(r, idx['岗位链接']) == f'https://a.example/{i}'
+                    or S.cell_value(r, idx['岗位名称']) == f'产品经理{i}')
 
     def quota(self, limit, company='甲公司', scope='公司总量', text='每人限投2个岗位', source=None):
         src = self.root / ('src-%d.txt' % len(list(self.root.glob('src-*.txt'))))
@@ -78,11 +95,13 @@ class SyncTests(unittest.TestCase):
         return str(f)
 
     def role(self, i, to):
-        return {"sheet": "中国大陆", "company": "甲公司", "link": f"https://a.example/{i}", "title": f"产品经理{i}", "to": to}
+        return {"code": self.code(i), "to": to}
+
+    def company_row(self, code, to):
+        return {"sheet": "中国大陆", "code": code, "to": to}
 
     def migrate(self):
-        rows = [self.role(i, '岗位待筛选') for i in range(4)] + [{"sheet": "中国大陆", "company": "乙公司", "to": "待搜索"},
-                                                                {"sheet": "中国大陆", "company": "甲公司", "to": "已有岗位"}]
+        rows = [self.role(i, '岗位待筛选') for i in range(4)] + [self.company_row('C00002', '待搜索'), self.company_row('C00001', '已有岗位')]
         self.run_cmd('confirm', '--input', self.items(rows), '--quote', '确认迁移')
 
     def test_illegal_or_empty_label_blocks_write(self):
@@ -94,7 +113,7 @@ class SyncTests(unittest.TestCase):
     def test_unknown_label_and_wrong_row_kind_rejected(self):
         p = self.run_cmd('propose', '--input', self.items([self.role(0, '已投递了')]), ok=False)
         self.assertIn('非法标签', p.stderr)
-        p = self.run_cmd('propose', '--input', self.items([{"sheet": "中国大陆", "company": "乙公司", "to": "岗位待筛选"}]), ok=False)
+        p = self.run_cmd('propose', '--input', self.items([self.company_row('C00002', '岗位待筛选')]), ok=False)
         self.assertIn('不适用', p.stderr)
 
     def test_unconfirmed_status_edit_in_json_blocks_write(self):
@@ -111,7 +130,7 @@ class SyncTests(unittest.TestCase):
     def test_propose_shows_current_and_new_and_changes_nothing(self):
         before = (self.root / '岗位交接/工作簿全量.json').read_bytes()
         out = json.loads(self.run_cmd('propose', '--input', self.items([self.role(0, '岗位待筛选')])).stdout)
-        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0：当前状态是「旧值」，更新状态是「岗位待筛选」'])
+        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0（J000001）：当前状态是「旧值」，更新状态是「岗位待筛选」'])
         self.assertEqual(before, (self.root / '岗位交接/工作簿全量.json').read_bytes())
 
     def test_confirm_write_readback_and_dropdown(self):
@@ -145,32 +164,39 @@ class SyncTests(unittest.TestCase):
         p = self.run_cmd('confirm', '--input', self.items([self.role(i, '岗位待投递') for i in range(3)]), '--quote', 'x', ok=False)
         self.assertIn('超过本轮名额', p.stderr)
 
+    def new_role(self, company, link, title, **values):
+        return {"key": {"sheet": "中国大陆", "company": company, "role": "new"},
+                "values": {"岗位链接": link, "岗位名称": title, **values}}
+
     def test_upsert_cannot_change_status_and_new_role_needs_confirmation(self):
         self.migrate()
         self.run_cmd('write')
-        p = self.run_cmd('upsert', '--input', self.items([{"key": {"sheet": "中国大陆", "company": "乙公司", "link": "https://b.example/1", "title": "AI产品"}, "values": {"投递状态": "岗位待投递"}}]), ok=False)
+        p = self.run_cmd('upsert', '--input', self.items([self.new_role('乙公司', 'https://b.example/1', 'AI产品', 投递状态='岗位待投递')]), ok=False)
         self.assertIn('不能修改投递状态', p.stderr)
-        self.run_cmd('upsert', '--input', self.items([{"key": {"sheet": "中国大陆", "company": "乙公司", "link": "https://b.example/1", "title": "AI产品"}, "values": {"工作地点": "北京"}}]))
+        out = json.loads(self.run_cmd('upsert', '--input', self.items([self.new_role('乙公司', 'https://b.example/1', 'AI产品', 工作地点='北京')])).stdout)
+        self.assertEqual(out['codes'], ['J000005'])
         p = self.run_cmd('write', ok=False)
         self.assertIn('投递状态为空', p.stderr)
+        # 同公司同链接再“新增”：拒绝并报出已有编码，不会出现第二行
+        p = self.run_cmd('upsert', '--input', self.items([self.new_role('乙公司', 'https://b.example/1/', 'AI产品')]), ok=False)
+        self.assertIn('J000005', p.stderr)
+        master = self.master()
+        self.assertEqual(M.sites(master)['S0002']['站点'], 'https://b.example')
+        self.assertEqual(master['编码计数器'], {'C': 2, 'S': 2, 'J': 5})
 
-    def test_upsert_clearing_link_removes_hyperlink_and_duplicate_company_row_blocked(self):
+    def test_upsert_cannot_write_locked_columns_or_change_link(self):
         self.migrate()
-        self.run_cmd('write')
-        self.run_cmd('upsert', '--input', self.items([{"key": {"sheet": "中国大陆", "company": "甲公司", "link": "https://a.example/3", "title": "产品经理3"}, "values": {"岗位链接": None, "岗位名称": None}}]))
-        master = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
-        row = next(r for r in master['sheets'][0]['rows'] if r['row'] == 6)
-        self.assertFalse(any(c['column'] == 9 for c in row['cells']))
-        p = self.run_cmd('write', ok=False)  # 名称和链接都清空后变成第二个公司行：业务键重复，且岗位标签不适用于公司行
-        self.assertIn('业务键重复', p.stderr)
-        self.assertIn('不适用于公司行', p.stderr)
+        for values, msg in (({'岗位编码': 'J999999'}, '不能写这些列'), ({'投递链接': 'https://a.example/f'}, 'set-apply-link'),
+                            ({'志愿顺序': 1}, 'set-order'), ({'公司': '别名'}, '公司名只在公司主数据改'),
+                            ({'岗位链接': 'https://a.example/x'}, 'relink')):
+            p = self.run_cmd('upsert', '--input', self.items([{"key": {"code": self.code(0)}, "values": values}]), ok=False)
+            self.assertIn(msg, p.stderr, values)
 
     def test_clear_orphans_only_for_rows_without_company(self):
         p = self.run_cmd('clear-orphans', '--input', self.items([{"sheet": "中国大陆", "row": 2}]), '--quote', 'x', ok=False)
         self.assertIn('有公司名', p.stderr)
         wb = load_workbook(self.root / 'book.xlsx'); ws = wb['中国大陆']; ws.cell(8, 9).value = 'https://ghost'; wb.save(self.root / 'book.xlsx')
-        snap = workbook_store.snapshot(self.root / 'book.xlsx')
-        (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+        self.snapshot()
         self.migrate()
         self.run_cmd('clear-orphans', '--input', self.items([{"sheet": "中国大陆", "row": 8}]), '--quote', '清空')
         self.run_cmd('write')
@@ -180,7 +206,7 @@ class SyncTests(unittest.TestCase):
         self.migrate()
         self.run_cmd('write')
         for city in ('北京', '上海'):
-            self.run_cmd('upsert', '--input', self.items([{"key": {"sheet": "中国大陆", "company": "乙公司", "link": "https://b.example/1", "title": "AI产品"}, "values": {"工作地点": city}}]))
+            self.run_cmd('upsert', '--input', self.items([{"key": {"code": self.code(0)}, "values": {"工作地点": city}}]))
         self.assertFalse((self.root / '岗位交接/备份').exists())
         self.assertEqual(sorted(p.name for p in (self.root / '岗位交接').iterdir()), ['工作簿全量.json'])
 
@@ -244,8 +270,7 @@ class SyncTests(unittest.TestCase):
         from openpyxl.worksheet.table import Table
         ws.add_table(Table(displayName='Plans', ref='A1:D2'))
         wb.save(self.root / 'book.xlsx')
-        snap = workbook_store.snapshot(self.root / 'book.xlsx')
-        (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+        self.snapshot()
         self.run_cmd('set-quota-rules', '--input', self.items([self.quota(2)]))
         self.migrate()
         self.run_cmd('drop-column', '--sheet', '校招计划', '--name', '计划内投递限制')
@@ -263,8 +288,7 @@ class SyncTests(unittest.TestCase):
         from openpyxl.worksheet.table import Table
         ws.add_table(Table(displayName='Notes', ref='A1:B4'))
         wb.save(self.root / 'book.xlsx')
-        snap = workbook_store.snapshot(self.root / 'book.xlsx')
-        (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+        self.snapshot()
         self.run_cmd('set-quota-rules', '--input', self.items([self.quota(2)]))
         self.migrate()
         self.run_cmd('set-sheet-rows', '--sheet', '分类说明', '--input', self.items([['项目', '说明'], ['新', '新说明']]))
@@ -306,8 +330,8 @@ class SyncTests(unittest.TestCase):
         self.assertEqual((d['added'], d['removed'], d['changed'], d['cells']), (1, 0, 1, 1))
         self.assertGreaterEqual(d['moved'], 4)
         self.assertIn('新增：中国大陆｜甲公司｜新岗位', d['text'])
-        self.assertIn('新岗位｜投递状态：', d['text'])  # 新增行同时显示投递状态
-        self.assertIn('修改：中国大陆｜乙公司｜公司行（第8行）：主要行业：当前「互联网」→写入「金融」', d['text'])
+        self.assertIn('新岗位（None）｜投递状态：', d['text'])  # 新增行同时显示投递状态（绕过脚本加的行没有编码）
+        self.assertIn('修改：中国大陆｜乙公司｜公司行（C00002）（第8行）：主要行业：当前「互联网」→写入「金融」', d['text'])
         self.assertNotIn('公司：当前', d['text'])  # 不再把位置挪动报成换公司
 
     def test_report_summarizes_company_from_master_json(self):
@@ -330,7 +354,7 @@ class SyncTests(unittest.TestCase):
         p = self.run_cmd('write', ok=False)
         self.assertIn('缺少列「投递截止」', p.stderr)
         self.run_cmd('add-column', '--sheet', '中国大陆', '--name', '投递截止')
-        key = lambda i: {"sheet": "中国大陆", "company": "甲公司", "link": f"https://a.example/{i}", "title": f"产品经理{i}"}
+        key = lambda i: {"code": self.code(i)}
         p = self.run_cmd('upsert', '--input', self.items([{"key": key(0), "values": {"备注": "Codex首轮已查，见 岗位交接/x.json"}}]), ok=False)
         self.assertIn('备注', p.stderr)
         p = self.run_cmd('upsert', '--input', self.items([{"key": key(0), "values": {"投递截止": "下周五"}}]), ok=False)
@@ -339,7 +363,7 @@ class SyncTests(unittest.TestCase):
         self.run_cmd('upsert', '--input', self.items([{"key": key(1), "values": {"备注": "用户例外保留：城市在苏州但用户要求保留"}}]))
         self.run_cmd('write')
         ws = load_workbook(self.root / 'book.xlsx')['中国大陆']
-        self.assertEqual(ws.cell(1, 12).value, '投递截止')
+        self.assertEqual(ws.cell(1, 18).value, '投递截止')
         self.assertEqual(ws.cell(4, 11).value, '用户例外保留：城市在苏州但用户要求保留')
 
     def test_title_with_choice_order_rejected(self):
@@ -353,11 +377,10 @@ class SyncTests(unittest.TestCase):
         self.migrate()
         bad = 'A岗（第1志愿） / B岗（第2志愿）'
         # 新增行：名称只在业务键里
-        p = self.run_cmd('upsert', '--input', self.items([{"key": {"sheet": "中国大陆", "company": "甲公司",
-                         "link": "https://a.example/9", "title": bad}, "values": {"工作地点": "上海"}}]), ok=False)
+        p = self.run_cmd('upsert', '--input', self.items([self.new_role('甲公司', 'https://a.example/9', bad, 工作地点='上海')]), ok=False)
         self.assertIn('志愿', p.stderr)
-        # 改名：名称在 values 里
-        key0 = {"sheet": "中国大陆", "company": "甲公司", "link": "https://a.example/0", "title": "产品经理0"}
+        # 改名
+        key0 = {"code": self.code(0)}
         p = self.run_cmd('upsert', '--input', self.items([{"key": key0, "values": {"岗位名称": bad}}]), ok=False)
         self.assertIn('志愿', p.stderr)
         master = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
@@ -366,16 +389,15 @@ class SyncTests(unittest.TestCase):
         S.set_cell(master['sheets'][0]['rows'][1], 5, bad)
         (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(master, ensure_ascii=False), encoding='utf-8')
         out = json.loads(self.run_cmd('check', ok=False).stdout)
-        self.assertEqual(out['field_problems'], 1)
-        self.assertIn('志愿', out['field_problem_samples'][0])
+        self.assertEqual(sum('志愿' in x for x in out['field_problem_samples']), 1)
         p = self.run_cmd('write', ok=False)
         self.assertIn('志愿', p.stderr)
 
     def test_rename_is_not_a_status_change(self):
-        """改岗位名称（业务键的一部分）后，按同公司同链接找回 Excel 原行，不误报为未确认的状态变更。"""
+        """改岗位名称后行身份（岗位编码）不变，不误报为未确认的状态变更。"""
         self.migrate()
         self.run_cmd('write')
-        key0 = {"sheet": "中国大陆", "company": "甲公司", "link": "https://a.example/0", "title": "产品经理0"}
+        key0 = {"code": self.code(0)}
         self.run_cmd('upsert', '--input', self.items([{"key": key0, "values": {"岗位名称": "AI产品经理（官网原名）"}}]))
         out = json.loads(self.run_cmd('check', ok=False).stdout)
         self.assertEqual((out['status_changes'], out['status_changes_without_user_confirmation']), (0, 0))
@@ -396,7 +418,6 @@ class SyncTests(unittest.TestCase):
         names = [(r['row'], S.cell_value(r, 2), S.cell_value(r, 5)) for r in sheet['rows'][1:]]
         self.assertEqual(names, [(2, '甲公司', None), (3, '甲公司', '产品经理3'), (4, '乙公司', None)])
         self.assertEqual([v['公司'] for r, v in S.quota_records(master)], ['甲公司'])
-        rows = [{"sheet": "中国大陆", "company": "甲公司", "link": "https://a.example/3", "title": "产品经理3"}]
         self.run_cmd('write')
 
     def test_reset_whole_company_adds_placeholder(self):
@@ -430,63 +451,94 @@ class SyncTests(unittest.TestCase):
         self.assertEqual([v['公司'] for r, v in S.quota_records(master)], ['甲公司'])
         self.run_cmd('write')
 
-    def relink_item(self, i, new, old=None):
-        return {"sheet": "中国大陆", "company": "甲公司", "link": old or f"https://a.example/{i}", "title": f"产品经理{i}", "new_link": new}
+    def relink_item(self, i, new):
+        return {"code": self.code(i), "new_link": new}
 
-    def test_relink_keeps_status_without_reconfirmation(self):
-        """换链接：upsert 不能直接改已有行链接；relink 预览不改文件、无原话不执行；确认后写 Excel 状态不变、不要求重新确认。"""
+    def test_relink_keeps_code_and_status_without_reconfirmation(self):
+        """换链接：upsert 不能直接改；relink 预览不改文件、无原话不执行；确认后岗位编码不变、状态不变、不要求重新确认。"""
         self.migrate()
         self.run_cmd('confirm', '--input', self.items([self.role(0, '岗位待投递')]), '--quote', '选0')
         self.run_cmd('write')
-        key0 = {k: v for k, v in self.role(0, '').items() if k != 'to'}
-        p = self.run_cmd('upsert', '--input', self.items([{"key": key0, "values": {"岗位链接": "https://a.example/0-new"}}]), ok=False)
+        code0 = self.code(0)
+        p = self.run_cmd('upsert', '--input', self.items([{"key": {"code": code0}, "values": {"岗位链接": "https://a.example/0-new"}}]), ok=False)
         self.assertIn('请用 relink', p.stderr)
         before = (self.root / '岗位交接/工作簿全量.json').read_bytes()
         out = json.loads(self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-new')]), '--preview').stdout)
-        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0：岗位链接「https://a.example/0」→「https://a.example/0-new」'
-                                                    '（投递状态「岗位待投递」保持不变，志愿顺序等投递数据随行迁移）'])
+        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0（J000001）：岗位链接「https://a.example/0」→「https://a.example/0-new」'
+                                                    '（岗位编码不变，投递状态不变）'])
         self.assertEqual(before, (self.root / '岗位交接/工作簿全量.json').read_bytes())
         self.assertIn('原话', self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-new')]), ok=False).stderr)
         self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-new')]), '--quote', '换成官网新链接')
         chk = json.loads(self.run_cmd('check', ok=False).stdout)
-        self.assertEqual((chk['link_changes_waiting_for_excel'], chk['status_changes_without_user_confirmation']), (1, 0))
+        self.assertEqual(chk['status_changes_without_user_confirmation'], 0)
         self.assertEqual(json.loads(self.run_cmd('write').stdout)['status_changes_applied'], 0)
         ws = load_workbook(self.root / 'book.xlsx')['中国大陆']
-        self.assertEqual((ws.cell(3, 9).value, ws.cell(3, 9).hyperlink.target, ws.cell(3, 10).value),
-                         ('https://a.example/0-new', 'https://a.example/0-new', '岗位待投递'))
-        self.assertEqual(json.loads(self.run_cmd('check').stdout)['link_changes_waiting_for_excel'], 0)
+        self.assertEqual((ws.cell(3, 9).value, ws.cell(3, 9).hyperlink.target, ws.cell(3, 10).value, ws.cell(3, 13).value),
+                         ('https://a.example/0-new', 'https://a.example/0-new', '岗位待投递', code0))
+        ledger = json.loads((self.root / '产品管理/确认.json').read_text(encoding='utf-8'))
+        self.assertNotIn('identity_changes', ledger)
+        self.assertEqual([(e['code'], e['field'], e['value']) for e in ledger['value_confirmations']],
+                         [(code0, '岗位链接', 'https://a.example/0-new')])
 
-    def test_relink_rejects_bad_input_carries_confirmations_and_chains(self):
-        """新链接与同公司其它行重复、非 https、公司行都拒绝；未写入的确认随行迁移；写 Excel 前连续换两次只保留一条身份变更。"""
+    def test_relink_rejects_bad_input_and_moves_to_new_domain_site(self):
+        """新链接与同公司其它岗位重复、非 https、公司行都拒绝；新域名 = 新站点，原投递链接随旧站点清空。"""
         self.migrate()
         self.run_cmd('write')
-        for item, msg in ((self.relink_item(0, 'https://a.example/1'), '同公司其它行使用'),
+        for item, msg in ((self.relink_item(0, 'https://a.example/1'), '同公司其它岗位使用'),
                           (self.relink_item(0, 'http://a.example/x'), 'https'),
-                          ({"sheet": "中国大陆", "company": "乙公司", "new_link": "https://b.example/1"}, '公司行')):
+                          ({"sheet": "中国大陆", "code": "C00002", "new_link": "https://b.example/1"}, '公司行')):
             self.assertIn(msg, self.run_cmd('relink', '--input', self.items([item]), '--preview', ok=False).stderr)
-        self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-v2')]), '--quote', '第一次')
-        self.run_cmd('relink', '--input', self.items([self.relink_item(0, 'https://a.example/0-v3', 'https://a.example/0-v2')]), '--quote', '第二次')
-        self.run_cmd('confirm', '--input', self.items([self.role(1, '岗位待投递')]), '--quote', '选1')
-        self.run_cmd('relink', '--input', self.items([self.relink_item(1, 'https://a.example/1-new')]), '--quote', '1也换')
-        ledger = json.loads((self.root / '产品管理/确认.json').read_text(encoding='utf-8'))
-        self.assertEqual(sorted((c['old_key']['link'], c['new_key']['link']) for c in ledger['identity_changes'] if not c.get('applied_at')),
-                         [('https://a.example/0', 'https://a.example/0-v3'), ('https://a.example/1', 'https://a.example/1-new')])
-        self.assertEqual(json.loads(self.run_cmd('write').stdout)['status_changes_applied'], 1)  # 只有 1 的「待筛选→待投递」
-        ws = load_workbook(self.root / 'book.xlsx')['中国大陆']
-        self.assertEqual([(ws.cell(r, 9).value, ws.cell(r, 10).value) for r in (3, 4)],
-                         [('https://a.example/0-v3', '岗位待筛选'), ('https://a.example/1-new', '岗位待投递')])
+        self.run_cmd('set-apply-link', '--input', self.items([{"code": self.code(1), "投递链接": "https://a.example/apply/1"}]), '--quote', '记下申请页')
+        self.run_cmd('relink', '--input', self.items([self.relink_item(1, 'https://jobs.a-new.example/1')]), '--quote', '官网换系统了')
+        master = self.master()
+        sites = M.sites(master)
+        row = next(r for r in master['sheets'][0]['rows'] if r['row'] == 4)
+        self.assertEqual((S.cell_value(row, 13), S.cell_value(row, 14), S.cell_value(row, 15)), ('J000002', 'S0002', None))
+        self.assertEqual(sites['S0002']['站点'], 'https://jobs.a-new.example')
+        self.run_cmd('write')
+
+    def test_http_only_official_site_gets_a_site_code_as_recorded(self):
+        # 官网只有 http（如民生银行）：站点照原样记录协议、域名和端口；投递端仍只接受 https
+        m = self.master()
+        s = m['sheets'][0]
+        idx = S.headers(s)
+        row = next(r for r in s['rows'] if S.cell_value(r, idx['岗位名称']) == '产品经理0')
+        S.set_cell(row, idx['站点编码'], None)
+        row['cells'] = [c for c in row['cells'] if c['column'] != idx['站点编码']]
+        S.set_cell(row, idx['岗位链接'], 'http://career.example.cn:8080/index.jsp#/app/recruitmentview/abc-1')
+        self.assertEqual(M.origin('http://career.example.cn:8080/index.jsp#/x'), 'http://career.example.cn:8080')
+        self.assertIsNone(M.origin('ftp://career.example.cn/x'))
+        M.assign_missing_codes(m, ['中国大陆'])
+        code = S.cell_value(row, idx['站点编码'])
+        self.assertEqual(M.sites(m)[code]['站点'], 'http://career.example.cn:8080')
+        self.assertEqual([p for p in M.validate(m, ['中国大陆']) if '站点' in p and code in p], [])
+
+    def test_apply_link_and_site_links_only_on_own_site(self):
+        self.migrate()
+        bad = self.run_cmd('set-apply-link', '--input', self.items([{"code": self.code(0), "投递链接": "https://other.example/apply"}]), '--preview', ok=False)
+        self.assertIn('不在岗位所在站点', bad.stderr)
+        out = json.loads(self.run_cmd('set-apply-link', '--input', self.items([{"code": self.code(0), "投递链接": "https://a.example/apply/0"}]), '--preview').stdout)
+        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0（J000001）：投递链接「空」→「https://a.example/apply/0」'])
+        self.run_cmd('set-apply-link', '--input', self.items([{"code": self.code(0), "投递链接": "https://a.example/apply/0"}]), '--quote', '对')
+        self.assertIn('不在本站点', self.run_cmd('set-site-links', '--input', self.items([{"code": "S0001", "登录链接": "https://x.example/login"}]), '--preview', ok=False).stderr)
+        self.assertIn('不能为空', self.run_cmd('set-site-links', '--input', self.items([{"code": "S0001", "账号核对页": None}]), '--preview', ok=False).stderr)
+        self.run_cmd('set-site-links', '--input', self.items([{"code": "S0001", "登录链接": None, "账号核对页": "https://a.example/me"}]), '--quote', '对')
+        site = M.sites(self.master())['S0001']
+        self.assertEqual((site['登录链接'], site['账号核对页']), (None, 'https://a.example/me'))
+        self.run_cmd('write')
+        self.assertEqual(load_workbook(self.root / 'book.xlsx')['投递站点'].cell(2, 6).value, 'https://a.example/me')
 
     def test_link_exception_note_only_by_command(self):
         """链接例外备注只能由 link-exception 写：upsert 写或改都拒绝；预览不改文件；确认后记入台账；可撤销；绕过脚本写入的被门禁拦下。"""
         self.migrate()
         self.run_cmd('write')
-        key0 = {k: v for k, v in self.role(0, '').items() if k != 'to'}
+        key0 = {"code": self.code(0)}
         p = self.run_cmd('upsert', '--input', self.items([{"key": key0, "values": {"备注": S.LINK_EXCEPTION_PREFIX + '列表页按ID定位'}}]), ok=False)
         self.assertIn('link-exception', p.stderr)
         item = {**key0, "定位说明": "列表页按 positionId 定位，点岗位名展开 JD"}
         before = (self.root / '岗位交接/工作簿全量.json').read_bytes()
         out = json.loads(self.run_cmd('link-exception', '--input', self.items([item]), '--preview').stdout)
-        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0：备注「空」→「用户例外保留：官网无独立详情页。列表页按 positionId 定位，点岗位名展开 JD」'
+        self.assertEqual(out['show_user_exactly'], ['中国大陆｜甲公司｜产品经理0（J000001）：备注「空」→「用户例外保留：官网无独立详情页。列表页按 positionId 定位，点岗位名展开 JD」'
                                                     '（生成投递批次时不检查该岗位链接是否为具体岗位页）'])
         self.assertEqual(before, (self.root / '岗位交接/工作簿全量.json').read_bytes())
         self.run_cmd('link-exception', '--input', self.items([item]), '--quote', '这种可以')
@@ -508,10 +560,10 @@ class SyncTests(unittest.TestCase):
         """公司状态标签单独成组（一组一个文件）：岗位行只能用岗位组、公司行只能用公司组；跨组重名、组文件缺失都拒绝加载。"""
         p = self.run_cmd('propose', '--input', self.items([self.role(0, '已有岗位')]), ok=False)
         self.assertIn('不适用于岗位行', p.stderr)
-        p = self.run_cmd('propose', '--input', self.items([{"sheet": "中国大陆", "company": "乙公司", "to": "岗位待筛选"}]), ok=False)
+        p = self.run_cmd('propose', '--input', self.items([self.company_row('C00002', '岗位待筛选')]), ok=False)
         self.assertIn('公司行只能用：待搜索、已有岗位', p.stderr)
-        out = json.loads(self.run_cmd('propose', '--input', self.items([{"sheet": "中国大陆", "company": "乙公司", "to": "待搜索"}])).stdout)
-        self.assertEqual(out['show_user_exactly'], ['中国大陆｜乙公司｜公司行：当前状态是「空」，更新状态是「待搜索」'])
+        out = json.loads(self.run_cmd('propose', '--input', self.items([self.company_row('C00002', '待搜索')])).stdout)
+        self.assertEqual(out['show_user_exactly'], ['中国大陆｜乙公司｜公司行（C00002）：当前状态是「空」，更新状态是「待搜索」'])
         comp = self.root / '产品管理/company-labels.json'
         good = comp.read_text(encoding='utf-8')
         comp.write_text(json.dumps({"schemaVersion": 1, "rowKind": "company", "labels": COMPANY_LABELS + [{"value": "岗位待筛选"}]},
@@ -524,19 +576,18 @@ class SyncTests(unittest.TestCase):
     def test_every_company_keeps_exactly_one_company_row(self):
         """方案B：每家公司在每张地区表固定一行公司行；新增岗位不占用公司行；新公司自动补公司行（状态为空，须确认）。"""
         self.migrate()
-        self.run_cmd('upsert', '--input', self.items([{"key": {"sheet": "中国大陆", "company": "乙公司", "link": "https://b.example/1", "title": "AI产品"},
-                                                        "values": {"工作地点": "北京"}}]))
+        self.run_cmd('upsert', '--input', self.items([self.new_role('乙公司', 'https://b.example/1', 'AI产品', 工作地点='北京')]))
         master = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
         rows = [(r['row'], S.cell_value(r, 2), S.cell_value(r, 5), S.cell_value(r, 10)) for r in master['sheets'][0]['rows'][1:]]
         self.assertEqual(rows[-2:], [(7, '乙公司', None, '待搜索'), (8, '乙公司', 'AI产品', None)])
-        out = json.loads(self.run_cmd('upsert', '--input', self.items([{"key": {"sheet": "中国大陆", "company": "丙公司", "link": "https://c.example/1", "title": "AI产品"},
-                                                                        "values": {"工作地点": "上海"}}])).stdout)
+        out = json.loads(self.run_cmd('upsert', '--input', self.items([self.new_role('丙公司', 'https://c.example/1', 'AI产品', 工作地点='上海')])).stdout)
         self.assertEqual(out['company_rows_created'], ['中国大陆｜丙公司'])
         master = json.loads((self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
         rows = [(r['row'], S.cell_value(r, 2), S.cell_value(r, 5)) for r in master['sheets'][0]['rows'][1:]]
         self.assertEqual(rows[-2:], [(9, '丙公司', None), (10, '丙公司', 'AI产品')])
         # 绕过脚本删掉公司行：门禁报缺公司行
         master['sheets'][0]['rows'] = [r for r in master['sheets'][0]['rows'] if not (S.cell_value(r, 2) == '甲公司' and S.cell_value(r, 5) is None)]
+        self.assertEqual(M.companies(master)['C00003']['名称'], '丙公司')
         S.refresh_digest(master)
         (self.root / '岗位交接/工作簿全量.json').write_text(json.dumps(master, ensure_ascii=False), encoding='utf-8')
         self.assertIn('中国大陆｜甲公司 缺少公司行', self.run_cmd('write', ok=False).stderr)

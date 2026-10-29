@@ -80,7 +80,7 @@ def run_sync(*args, items=None):
 
 @server.tool()
 def recruiting_status_propose(items:list[dict])->dict:
-    """只读：生成“当前状态是X，更新状态是Y”（含名额收口派生变更）。必须原样展示给用户并取得明确确认。"""
+    """只读：生成“当前状态是X，更新状态是Y”（含名额收口派生变更）。items：[{code: 岗位编码, to}]，公司行 [{sheet, code: 公司编码, to}]。必须原样展示给用户并取得明确确认。"""
     return run_sync('propose',items=items)
 
 
@@ -92,13 +92,14 @@ def recruiting_status_confirm(items:list[dict],user_quote:str,confirmation_ref:s
 
 @server.tool()
 def recruiting_rows_upsert(items:list[dict])->dict:
-    """按业务键增改主数据 JSON 的非状态字段（新岗位、JD 等）；不能改投递状态，也不能更换已有岗位的链接（用 recruiting_link_change_preview/confirm）。"""
+    """新增岗位（{key:{sheet,company,role:"new"},values}，脚本分配岗位编码）或按编码改非状态字段（{key:{code},values}）；公司行用 {key:{sheet,company}}。
+    不能改投递状态、岗位链接（recruiting_link_change_*）、投递链接、站点链接、志愿顺序和编码列。"""
     return run_sync('upsert',items=items)
 
 
 @server.tool()
 def recruiting_link_exception_preview(items:list[dict])->dict:
-    """只读：登记或撤销链接例外（官网无独立详情页）前生成备注“当前 → 更新”（items：[{sheet,company,link,title,定位说明}]，撤销给 "撤销": true）。必须原样展示给用户并取得明确确认。"""
+    """只读：登记或撤销链接例外（官网无独立详情页）前生成备注“当前 → 更新”（items：[{code: 岗位编码, 定位说明}]，撤销给 "撤销": true）。必须原样展示给用户并取得明确确认。"""
     return run_sync('link-exception','--preview',items=items)
 
 
@@ -110,14 +111,38 @@ def recruiting_link_exception_confirm(items:list[dict],user_quote:str)->dict:
 
 @server.tool()
 def recruiting_link_change_preview(items:list[dict])->dict:
-    """只读：更换已有岗位链接前生成“岗位链接 X → Y”（items：[{sheet,company,link,title,new_link}]，link/title 为该行当前值）。必须原样展示给用户并取得明确确认。"""
+    """只读：更换已有岗位链接前生成“岗位链接 X → Y”（items：[{code: 岗位编码, new_link}]）。必须原样展示给用户并取得明确确认。"""
     return run_sync('relink','--preview',items=items)
 
 
 @server.tool()
 def recruiting_link_change_confirm(items:list[dict],user_quote:str)->dict:
-    """用户确认后更换已有岗位链接：投递状态不变、无需重新确认，确认记录与志愿顺序等投递数据随行迁移；不写 Excel。"""
+    """用户确认后更换已有岗位链接：岗位编码与投递状态不变，引用它的记录都不受影响；不写 Excel。"""
     return run_sync('relink','--quote',user_quote,items=items)
+
+
+@server.tool()
+def recruiting_apply_link_preview(items:list[dict])->dict:
+    """只读：写入/更换投递链接前生成“投递链接 X → Y”（items：[{code: 岗位编码, 投递链接}]）。必须原样展示给用户并取得明确确认。"""
+    return run_sync('set-apply-link','--preview',items=items)
+
+
+@server.tool()
+def recruiting_apply_link_confirm(items:list[dict],user_quote:str)->dict:
+    """用户确认后写入投递链接（只接受岗位所在站点的地址）；不写 Excel。"""
+    return run_sync('set-apply-link','--quote',user_quote,items=items)
+
+
+@server.tool()
+def recruiting_site_links_preview(items:list[dict])->dict:
+    """只读：写入/更换站点登录链接、账号核对页前生成“当前 → 更新”（items：[{code: 站点编码, 登录链接?, 账号核对页?}]）。必须原样展示给用户并取得明确确认。"""
+    return run_sync('set-site-links','--preview',items=items)
+
+
+@server.tool()
+def recruiting_site_links_confirm(items:list[dict],user_quote:str)->dict:
+    """用户确认后写入站点链接（登录链接可为空：该站点只能在岗位页登录）；不写 Excel。"""
+    return run_sync('set-site-links','--quote',user_quote,items=items)
 
 
 @server.tool()

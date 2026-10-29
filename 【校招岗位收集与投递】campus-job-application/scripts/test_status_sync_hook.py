@@ -67,6 +67,24 @@ class HookDetailsTests(unittest.TestCase):
             self.assertIn('master.json', hook.tool_violation(cfg, {'tool_name': name, 'tool_input': args}))
         self.assertIsNotNone(hook.tool_violation(cfg, {'tool_name': 'functions.exec', 'tool_input': {'input': wrapped + '; write_text("master.json")'}}))
 
+    def test_data_gate_uses_the_same_write_detection_as_the_component_lock(self):
+        cfg = {'workbook': 'book.xlsx', 'masterData': '岗位交接/工作簿全量.json', 'confirmationLedger': 'ledger.json',
+               'companyStore': {'dir': '岗位交接/公司'}}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            f = '岗位交接/公司/中国大陆/Keep/登录.json'
+            writes = [f"node -e \"require('fs').writeFileSync('{f}','{{}}')\"",
+                      f"node -e \"require('fs').renameSync('/tmp/x.json','{f}')\"",
+                      f"python3 -c \"import os; os.replace('/tmp/x.json','{f}')\"",
+                      f"perl -pi -e 's/a/b/' {f}",
+                      f"echo '{{}}' > {f}",
+                      f"cp /tmp/x.json {f}"]
+            for cmd in writes:
+                self.assertIn('岗位交接/公司/', hook.tool_violation(cfg, {'tool_name': 'Bash', 'tool_input': {'command': cmd}, 'cwd': str(root)}, root) or [], cmd)
+            for cmd in [f'cat {f}', f"node -e \"console.log(require('fs').readFileSync('{f}','utf8'))\"",
+                        'node .agents/skills/job-application-assistant-v2/scripts/site-entry.mjs --workspace . --site S0015 --input /tmp/keep-entry.json']:
+                self.assertIsNone(hook.tool_violation(cfg, {'tool_name': 'Bash', 'tool_input': {'command': cmd}, 'cwd': str(root)}, root), cmd)
+
     def test_patch_guard_compares_full_path_not_file_name(self):
         cfg = {'workbook': 'book.xlsx', 'masterData': '岗位交接/master.json', 'confirmationLedger': 'ledger.json'}
         with tempfile.TemporaryDirectory() as tmp:
@@ -121,16 +139,19 @@ class StackGuardTests(unittest.TestCase):
         return hook.stack_violation(Path('/work'), {'tool_name': tool, 'tool_input': ti})
 
     def test_only_fixed_files_under_handoff_and_no_copies(self):
-        ok = [('Write', {'file_path': '/work/岗位交接/公司/中国大陆/甲公司/公司.json'}),
-              ('Edit', {'file_path': '/work/岗位交接/投递批次.json'}),
+        ok = [('Write', {'file_path': '/work/岗位交接/公司/C00001.json'}),
+              ('Edit', {'file_path': '/work/岗位交接/投递回传.json'}),
               ('Write', {'file_path': '/work/岗位交接/公司/中国大陆/网易/登录@leihuo.163.com.json'}),
               ('Write', {'file_path': '/work/岗位交接/公司/中国大陆/网易/表单定义.json'}),
               ('Bash', {'command': 'python3 company_store.py refresh'}),
-              ('Bash', {'command': 'cat 岗位交接/投递批次.json'}),
+              ('Bash', {'command': 'cat 岗位交接/公司/C00001.json'}),
               ('Bash', {'command': 'rm -rf 岗位交接/2026-10-18-旧批次'})]
         for tool, ti in ok:
             self.assertIsNone(self.check(tool, ti), (tool, ti))
         bad = [('Write', {'file_path': '/work/岗位交接/2026-10-21-新批次/公司方案.json'}),
+               ('Write', {'file_path': '/work/岗位交接/公司/中国大陆/甲公司/公司.json'}),
+               ('Write', {'file_path': '/work/岗位交接/投递批次.json'}),
+               ('Write', {'file_path': '/work/岗位交接/公司/C1.json'}),
                ('Write', {'file_path': '/work/岗位交接/公司/中国大陆/甲公司/研究记录.json'}),
                ('Write', {'file_path': '/work/岗位交接/公司/中国大陆/甲公司/表单/模板.json'}),
                ('Write', {'file_path': '/work/产品管理/求职目标-上一版.json'}),
@@ -271,7 +292,7 @@ class ConversationReminderTests(unittest.TestCase):
             'search-session': {'workflow': 'search'},
         }}), encoding='utf-8')
 
-    def invoke(self, event, session='application-session', **extra):
+    def invoke(self, event, session='application-session', pending_value=('PENDING', {}), sync_value=None, **extra):
         import io
         payload = {'hook_event_name': event, 'session_id': session, **extra}
         cfg = {'workbook': 'book.xlsx', 'masterData': 'master.json',
@@ -284,8 +305,8 @@ class ConversationReminderTests(unittest.TestCase):
              patch.object(hook, 'record_approval', return_value='') as approval, \
              patch.object(hook, 'rules_text', return_value='RULES'), \
              patch.object(hook, 'browser_rules', return_value='BROWSER'), \
-             patch.object(hook, 'pending_text', return_value=('PENDING', {})) as pending, \
-             patch.object(hook, 'sync', return_value={}) as sync:
+             patch.object(hook, 'pending_text', return_value=pending_value) as pending, \
+             patch.object(hook, 'sync', return_value=sync_value or {}) as sync:
             hook.main()
             return json.loads(out.getvalue()), pending.called, sync.called, approval.called
 
@@ -309,6 +330,16 @@ class ConversationReminderTests(unittest.TestCase):
         self.assertEqual(result['decision'], 'block')
         self.assertTrue(pending)
         self.assertTrue(sync)
+
+    def test_stop_before_code_migration_does_not_raise_false_alarms(self):
+        # 编码迁移前 check 只回 migration_required：不拦截、不问 Excel
+        result, _, _, _ = self.invoke('Stop', 'search-session', pending_value=('', {}), sync_value={'migration_required': True})
+        self.assertEqual(result, {})
+        # 只有名额收口时只要求展示收口变更，不问“JSON 有未写入 Excel 的改动”
+        result, _, _, _ = self.invoke('Stop', 'search-session', pending_value=('', {}), sync_value={'quota_full_but_unclosed': ['X：当前状态是A，更新状态是B']})
+        self.assertEqual(result['decision'], 'block')
+        self.assertNotIn('未写入 Excel', result['reason'])
+        self.assertIn('propose', result['reason'])
 
     def test_disabled_session_keeps_write_protection(self):
         result, _, _, _ = self.invoke('PreToolUse', tool_name='Edit',

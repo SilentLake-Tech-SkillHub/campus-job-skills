@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """JSON→Excel 唯一同步脚本：工作簿全量 JSON 为唯一主数据，Excel 只由本脚本从 JSON 写出。
 
+行身份只认固定编码（见 master_codes.py）：岗位行 = 岗位编码，公司行 = 地区表 + 公司编码。
+岗位链接、岗位名称、公司名都是值，变了在原编码下覆盖，不改变任何记录的身份。
+
 投递状态只能使用标签配置 JSON 中定义的标签；任何状态变更都必须先有用户对
 “当前状态是X，更新状态是Y”的逐行确认记录（确认台账），否则拒绝写入。
 
 子命令：
-  check     校验主数据标签规则，报告 JSON 与 Excel 的差异和未确认的状态变更
+  check     校验主数据标签、字段、编码规则，报告 JSON 与 Excel 的差异和未确认的状态变更
   status    只读：显示某行当前状态
   propose   只读：生成“当前状态是X，更新状态是Y”的核对文本，不改任何文件
   confirm   用户明确确认后，把变更逐行记入确认台账并更新主数据 JSON（不写 Excel）
   report    只读：一家或多家公司的汇报（主链接、计划、管培/产培、岗位按状态、名额与占用）
-  upsert    按业务键增改主数据 JSON 的非状态字段（新岗位、JD 等）；不能改投递状态，也不能更换已有岗位的链接
-  link-exception  登记/撤销“官网无独立详情页”的链接例外：备注只能由本命令写成固定格式，用户确认后执行；forward 据此不检查该岗位链接是否为具体岗位页
-  relink    更换已有岗位的链接：--preview 生成“岗位链接 X → Y”给用户看，确认后带 --quote 执行；状态不变、无需重新确认，志愿顺序等投递数据随行迁移
-  write     JSON→Excel：标签门禁→状态确认门禁→写出→下拉校验→逐格读回→回写绑定（不做快照，主数据只留一份“上一版”）
+  upsert    新增岗位（分配岗位编码）或按编码改非状态字段；不能改投递状态、链接和编码列
+  link-exception  登记/撤销“官网无独立详情页”的链接例外（按岗位编码），用户确认后执行
+  relink          更换岗位链接（按岗位编码）：--preview 给用户看“岗位链接 X → Y”，确认后带 --quote 执行；编码不变
+  set-apply-link  写入/更换岗位的投递链接（按岗位编码），预览 → 用户确认
+  set-site-links  写入/更换站点的登录链接、账号核对页（按站点编码），预览 → 用户确认
+  set-order       写入用户给定的志愿顺序（按岗位编码），附用户原话
+  write     JSON→Excel：标签门禁→编码门禁→状态确认门禁→写出→下拉校验→逐格读回→回写绑定
   defer     用户选择“下一轮再写入”时登记延后（绑定当前 JSON 数据摘要）
   pending   供 Hook 使用：是否存在未写入 Excel 的 JSON 改动、用户是否已选择延后
 """
@@ -42,8 +48,11 @@ from openpyxl.comments import Comment
 from openpyxl.utils import column_index_from_string, get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import master_codes as M  # noqa: E402
+
 NAME_COL, LINK_COL, COMPANY_COL = '岗位名称', '岗位链接', '公司'
-COMPANY_INFO_COLS = ('地区', COMPANY_COL, '主要行业', '企业性质')
+COMPANY_INFO_COLS = ('地区', COMPANY_COL, M.COMPANY_CODE_COL, '主要行业', '企业性质')
 NOTE_COL = '备注'
 # 链接例外：官网没有独立的岗位详情页时，备注写成这个固定开头 + 定位说明，forward 不再检查该岗位链接是否为具体岗位页。
 # 这种备注只能由 link-exception 命令写入（用户确认、记入台账），upsert 不能写或改。
@@ -121,7 +130,9 @@ def write_bytes(path, data):
 
 
 def save_master(ctx, obj):
-    """主数据只有一份，覆盖写；不另存任何“上一版”或快照，回滚靠 git。"""
+    """主数据只有一份，覆盖写；不另存任何“上一版”或快照，回滚靠 git。
+    各表“公司”列是公司主数据名称的显示，保存前按公司编码重写。"""
+    M.sync_company_names(obj)
     refresh_quota_counts(ctx, obj)
     refresh_digest(obj)
     save_json(ctx.master, obj)
@@ -248,17 +259,9 @@ def row_kind(row, idx):
 
 
 def row_key(sheet_name, row, idx):
-    company = cell_value(row, idx[COMPANY_COL])
-    link = cell_value(row, idx[LINK_COL]) if LINK_COL in idx else None
-    name = cell_value(row, idx[NAME_COL]) if NAME_COL in idx else None
-    k = {'sheet': sheet_name, 'company': company}
-    if link:
-        k['link'] = link
-    if name:
-        k['title'] = name
-    if not link and not name:
-        k['placeholder'] = True
-    return k
+    """行身份只认编码：岗位行 {sheet, code: 岗位编码}；公司行 {sheet, code: 公司编码}。"""
+    col = M.ROLE_CODE_COL if row_kind(row, idx) == 'role' else M.COMPANY_CODE_COL
+    return {'sheet': sheet_name, 'code': cell_value(row, idx[col]) if col in idx else None}
 
 
 def key_id(k):
@@ -287,21 +290,30 @@ def validate_labels(ctx, master):
     for name, s, idx, row in iter_status_rows(ctx, master):
         k = row_key(name, row, idx)
         kid = key_id(k)
-        if not k['company']:
-            problems.append(f'{name}!{row["row"]} 公司为空')
+        company = cell_value(row, idx[COMPANY_COL])
+        ccode = cell_value(row, idx[M.COMPANY_CODE_COL]) if M.COMPANY_CODE_COL in idx else None
+        if not company or not ccode:
+            problems.append(f'{name}!{row["row"]} 公司或公司编码为空')
+            continue
+        if not k['code']:
+            problems.append(f'{name}!{row["row"]} {company} 缺少行编码')
             continue
         if kid in seen:
-            problems.append(f'{name}!{row["row"]} 与第{seen[kid]}行业务键重复：{kid}')
+            problems.append(f'{name}!{row["row"]} 与第{seen[kid]}行编码重复：{kid}')
         seen[kid] = row['row']
         kind = row_kind(row, idx)
-        company_rows[(name, k['company'])] = company_rows.get((name, k['company']), 0) + (kind == 'company')
+        company_rows[(name, ccode)] = company_rows.get((name, ccode), 0) + (kind == 'company')
         err = label_problem(ctx, cell_value(row, idx[ctx.column]), kind)
         if err:
-            problems.append(f'{name}!{row["row"]} {k["company"]} {err}')
-    for (name, company), n in company_rows.items():
+            problems.append(f'{name}!{row["row"]} {company} {err}')
+    for (name, ccode), n in company_rows.items():
         if not n:
-            problems.append(f'{name}｜{company} 缺少公司行（每家公司在每张地区表固定一行公司行，有没有岗位都保留）')
+            problems.append(f'{name}｜{M.company_name(master, ccode) or ccode} 缺少公司行（每家公司在每张地区表固定一行公司行，有没有岗位都保留）')
     return problems
+
+
+def validate_codes(ctx, master):
+    return M.validate(master, ctx.sheets, LINK_COL, NAME_COL)
 
 
 def link_exception_note(ctx, ledger, sheet_name, row, idx):
@@ -309,12 +321,9 @@ def link_exception_note(ctx, ledger, sheet_name, row, idx):
     note = str(cell_value(row, idx[NOTE_COL]) or '') if NOTE_COL in idx else ''
     if not note.startswith(LINK_EXCEPTION_PREFIX):
         return None, False
-    k = row_key(sheet_name, row, idx)
+    k = key_id(row_key(sheet_name, row, idx))
     for e in ledger.get('link_exceptions', []):
-        ek = e.get('key') or {}
-        same = ek.get('sheet') == k['sheet'] and ek.get('company') == k['company'] and (
-            ek.get('link') == k['link'] if k.get('link') else ek.get('title') == k.get('title'))
-        if same and e.get('note') == note:
+        if key_id(e.get('key') or {}) == k and e.get('note') == note:
             return note, True
     return note, False
 
@@ -391,29 +400,55 @@ def add_column(ctx, sheet_name, column_name):
 def find_row(ctx, master, key):
     s = sheet_of(master, key['sheet'])
     idx = headers(s)
-    hits = [r for r in s['rows'] if r['row'] > 1 and key_id(row_key(key['sheet'], r, idx)) == key_id(key)]
+    hits = [r for r in s['rows'] if r['row'] > 1 and has_content(r['cells']) and key_id(row_key(key['sheet'], r, idx)) == key_id(key)]
     if len(hits) != 1:
-        raise SystemExit(f'业务键匹配 {len(hits)} 行，需唯一：{key_id(key)}')
+        raise SystemExit(f'编码匹配 {len(hits)} 行，需唯一：{key_id(key)}')
     return s, idx, hits[0]
 
 
 def normalize_key(d):
-    k = {'sheet': d['sheet'], 'company': d['company']}
-    if d.get('link'):
-        k['link'] = d['link']
-    if d.get('title'):
-        k['title'] = d['title']
-    if not d.get('link') and not d.get('title'):
-        k['placeholder'] = True
-    return k
+    """输入行引用 → 行身份。岗位行只需 {code: 岗位编码}（sheet 可省）；公司行须 {sheet, code: 公司编码}。"""
+    code = str(d.get('code') or '').strip()
+    kind = M.kind_of(code)
+    if kind == 'J':
+        return {'sheet': d.get('sheet'), 'code': code}
+    if kind == 'C':
+        if not d.get('sheet'):
+            raise SystemExit(f'公司行须同时给出地区表（sheet）：{code}')
+        return {'sheet': d['sheet'], 'code': code}
+    raise SystemExit(f'行引用必须是岗位编码（J000001）或 地区表+公司编码（C00001）：{d}')
+
+
+def resolve_key(ctx, master, d):
+    """补全岗位编码所在的地区表；返回完整行身份。"""
+    key = normalize_key(d)
+    if key['sheet']:
+        return key
+    hits = []
+    for name in ctx.sheets:
+        s = sheet_of(master, name)
+        idx = headers(s)
+        if M.ROLE_CODE_COL in idx:
+            hits += [name for r in s['rows'] if r['row'] > 1 and cell_value(r, idx[M.ROLE_CODE_COL]) == key['code']]
+    if len(hits) != 1:
+        raise SystemExit(f'岗位编码 {key["code"]} 在主表中匹配 {len(hits)} 行，需唯一')
+    return {'sheet': hits[0], 'code': key['code']}
 
 
 def refresh_digest(master):
     master['data_sha256'] = digest({'sheets': master['sheets'], 'company_batches': master.get('company_batches', {})})
 
 
-def describe(key):
-    return f"{key['sheet']}｜{key['company']}｜{key.get('title') or key.get('link') or '公司行'}"
+def describe(key, master=None):
+    """给用户看的行描述：地区｜公司名｜岗位名（编码）。"""
+    if master is not None and key.get('sheet'):
+        s = sheet_of(master, key['sheet'])
+        idx = headers(s)
+        for r in s['rows']:
+            if r['row'] > 1 and has_content(r['cells']) and key_id(row_key(key['sheet'], r, idx)) == key_id(key):
+                title = cell_value(r, idx[NAME_COL]) if NAME_COL in idx else None
+                return f"{key['sheet']}｜{cell_value(r, idx[COMPANY_COL])}｜{title or ('公司行' if row_kind(r, idx) == 'company' else '未命名岗位')}（{key['code']}）"
+    return f"{key.get('sheet') or ''}｜{key['code']}"
 
 
 # ---------- Excel 读写 ----------
@@ -492,7 +527,8 @@ def _part(v):
     return v
 
 
-ROW_KEY_COLUMNS = {'校招主链接': ('公司',), '校招计划': ('公司', '计划'), '投递名额': ('公司', '范围')}
+ROW_KEY_COLUMNS = {'校招主链接': (M.COMPANY_CODE_COL,), '校招计划': (M.COMPANY_CODE_COL, '计划'), '投递名额': (M.COMPANY_CODE_COL, '范围'),
+                   M.COMPANY_SHEET: (M.COMPANY_CODE_COL,), M.SITE_SHEET: (M.SITE_CODE_COL,)}
 
 
 def _by_name(cells):
@@ -506,18 +542,13 @@ def _by_name(cells):
 
 
 def _identity(ctx, sheet_name, head, row):
-    """按内容认行：地区表用 公司+岗位链接/岗位名（公司行只按公司）；其他表用公司+计划/范围；兜底用第一列。"""
+    """配对写入前后的同一行：地区表按行编码；其他表按公司编码+计划/范围；兜底用第一列。"""
     val = lambda h: (row.get(h) or {}).get('value')
     if sheet_name in ctx.sheets and COMPANY_COL in head:
-        link, name = val(LINK_COL), val(NAME_COL)
-        k = {'sheet': sheet_name, 'company': val(COMPANY_COL)}
-        if link:
-            k['link'] = link
-        if name:
-            k['title'] = name
-        if not link and not name:
-            k['placeholder'] = True
-        return key_id(k), describe(k)
+        role = bool(val(LINK_COL) or val(NAME_COL))
+        k = {'sheet': sheet_name, 'code': val(M.ROLE_CODE_COL if role else M.COMPANY_CODE_COL)}
+        label = f"{sheet_name}｜{val(COMPANY_COL)}｜{val(NAME_COL) or ('公司行' if not role else '未命名岗位')}（{k['code']}）"
+        return key_id(k), label
     cols = ROW_KEY_COLUMNS.get(sheet_name) or tuple(head[:1])
     parts = [str(val(h) or '') for h in cols]
     return json.dumps([sheet_name, parts], ensure_ascii=False), f"{sheet_name}｜{'｜'.join(p for p in parts if p) or '空行'}"
@@ -623,40 +654,21 @@ def excel_statuses(ctx):
                     continue
                 rk = row_key(name, {'row': n, 'cells': cells}, idx)
                 st = (vals[idx[ctx.column] - 1] if ctx.column in idx else None) or ''
-                current[key_id(rk)] = st
-                if rk.get('link'):  # 改名后按“同表同公司同链接”找回原行；同链接多行且状态不一致时不作数
-                    lk = link_key(rk)
-                    current[lk] = st if lk not in current or current[lk] == st else None
+                if rk['code']:
+                    current[key_id(rk)] = st
         return current
     finally:
         wb.close()
 
 
-def link_key(rk):
-    return 'link:' + key_id({'sheet': rk['sheet'], 'company': rk['company'], 'link': rk['link']})
-
-
-def identity_map(ctx):
-    """relink 登记、尚未写入 Excel 的身份变更：新业务键 → 旧业务键（Excel 里这一行还是旧键）。"""
-    return {key_id(c['new_key']): key_id(c['old_key'])
-            for c in ctx.ledger().get('identity_changes', []) if not c.get('applied_at')}
-
-
 def status_changes(ctx, master):
     """Excel 当前状态 → JSON 目标状态 的逐行差异。"""
     current = excel_statuses(ctx)
-    renamed = identity_map(ctx)
     changes = []
     for name, s, idx, row in iter_status_rows(ctx, master):
-        rk = row_key(name, row, idx)
-        kid = key_id(rk)
+        kid = key_id(row_key(name, row, idx))
         to = cell_value(row, idx[ctx.column]) or ''
-        frm = current.get(kid)
-        if frm is None and rk.get('link'):
-            frm = current.get(link_key(rk))
-        if frm is None and kid in renamed:  # relink 换过链接：按用户确认的旧业务键找回 Excel 中的原行
-            frm = current.get(renamed[kid])
-        frm = frm or ''
+        frm = current.get(kid) or ''
         if frm != to:
             changes.append({'key': json.loads(kid), 'from': frm, 'to': to})
     return changes
@@ -688,15 +700,44 @@ def apply_validation(ws, column_index, labels, max_row):
     ws.add_data_validation(dv)
 
 
-def write(ctx):
+def code_migration_statuses_unchanged(ctx, master):
+    """仅供一次性编码迁移的首次写入：Excel 还没有编码列，无法按编码配行；
+    此时编码列是迁移刚加的、行号未动，按「工作表 + 行号」核对每行状态与主数据完全一致，才允许写入。"""
+    wb = load_workbook(ctx.book, read_only=True)
+    try:
+        excel = {}
+        for name in ctx.sheets:
+            if name not in wb.sheetnames:
+                continue
+            rows = list(wb[name].iter_rows(values_only=True))
+            if not rows:
+                continue
+            idx = {v: i + 1 for i, v in enumerate(rows[0]) if v is not None}
+            if M.ROLE_CODE_COL in idx or M.COMPANY_CODE_COL in idx:
+                raise SystemExit(f'{name} 已有编码列：编码迁移已完成，按正常门禁写入')
+            for n, vals in enumerate(rows[1:], start=2):
+                excel[(name, n)] = (vals[idx[ctx.column] - 1] if ctx.column in idx and idx[ctx.column] <= len(vals) else None) or ''
+    finally:
+        wb.close()
+    diff = [f'{name} 第 {row["row"]} 行：Excel「{excel.get((name, row["row"]), "") or "空"}」≠ 主数据「{cell_value(row, idx[ctx.column]) or "空"}」'
+            for name, s, idx, row in iter_status_rows(ctx, master)
+            if (cell_value(row, idx[ctx.column]) or '') != excel.get((name, row['row']), '')]
+    if diff:
+        raise SystemExit('编码迁移首次写入要求 Excel 与主数据状态逐行一致，以下不一致：\n' + '\n'.join(diff[:50]))
+
+
+def write(ctx, code_migration=False):
     master = ctx.load_master()
-    problems = validate_labels(ctx, master) + validate_fields(ctx, master) + validate_quota(master) + validate_link_exceptions(ctx, master)
+    problems = (validate_labels(ctx, master) + validate_codes(ctx, master) + validate_fields(ctx, master)
+                + validate_quota(master) + validate_link_exceptions(ctx, master))
     if problems:
-        raise SystemExit('标签/字段门禁拒绝写入（共 %d 处）：\n' % len(problems) + '\n'.join(problems[:50]))
-    changes = status_changes(ctx, master)
+        raise SystemExit('标签/编码/字段门禁拒绝写入（共 %d 处）：\n' % len(problems) + '\n'.join(problems[:50]))
+    if code_migration:
+        code_migration_statuses_unchanged(ctx, master)
+    changes = [] if code_migration else status_changes(ctx, master)
     missing = unconfirmed(ctx, changes)
     if missing:
-        lines = [f"{describe(m['key'])}：当前状态是「{m['from'] or '空'}」，更新状态是「{m['to']}」" for m in missing[:50]]
+        lines = [f"{describe(m['key'], master)}：当前状态是「{m['from'] or '空'}」，更新状态是「{m['to']}」" for m in missing[:50]]
         raise SystemExit('状态变更门禁拒绝写入：以下 %d 行变更没有用户确认记录：\n' % len(missing) + '\n'.join(lines))
     wb = load_workbook(ctx.book)
     extra = [n for n in wb.sheetnames if n not in [s['name'] for s in master['sheets']]]
@@ -773,9 +814,6 @@ def write(ctx):
             e['applied_at'], e['applied_workbook_sha256'] = applied, sha
         else:
             e['superseded_at'] = applied
-    for c in ledger.get('identity_changes', []):
-        if not c.get('applied_at'):
-            c['applied_at'] = applied
     ledger['deferrals'] = []
     save_json(ctx.ledger_path, ledger)
     refresh_digest(master)
@@ -792,22 +830,22 @@ def propose(ctx, items, master=None):
     master = master or ctx.load_master()
     out = []
     for d in items:
-        key = normalize_key(d)
+        key = resolve_key(ctx, master, d)
         s, idx, row = find_row(ctx, master, key)
         cur = cell_value(row, idx[ctx.column]) or ''
         to = d['to']
         err = label_problem(ctx, to, row_kind(row, idx))
         if err:
-            raise SystemExit(f'标签门禁拒绝：{describe(key)} {err}')
+            raise SystemExit(f'标签门禁拒绝：{describe(key, master)} {err}')
         if to == cur:
             continue
         out.append({'key': key, 'from': cur, 'to': to,
-                    'text': f"{describe(key)}：当前状态是「{cur or '空'}」，更新状态是「{to}」"})
+                    'text': f"{describe(key, master)}：当前状态是「{cur or '空'}」，更新状态是「{to}」"})
     return out
 
 
 QUOTA_SHEET = '投递名额'
-QUOTA_HEAD = ['公司', '范围', '适用计划/批次', '投递上限', '当前投递数量', '是否分BU可平行投递', '是否可以滚动投递', '规则原文', '来源/核验日期']
+QUOTA_HEAD = ['公司', '范围', '适用计划/批次', '投递上限', '当前投递数量', '是否分BU可平行投递', '是否可以滚动投递', '规则原文', '来源/核验日期', M.COMPANY_CODE_COL]
 TRI = ('是', '否', '公司未披露')
 # 规则原文：官方来源文字的完整摘抄，写入时与来源原文逐字比对；没有官方说法时只能写“公司未披露”。
 QUOTE_SOURCE_KEY = '原文出处文件'
@@ -876,10 +914,10 @@ def quota_records(master):
 def validate_quota(master):
     probs, seen = [], {}
     for r, v in quota_records(master):
-        k = (v.get('公司'), v.get('范围'))
+        k = (v.get(M.COMPANY_CODE_COL), v.get('范围'))
         where = f"{QUOTA_SHEET}!{r['row']} {v.get('公司')}"
-        if not v.get('公司') or not v.get('范围'):
-            probs.append(where + ' 公司/范围不能为空')
+        if not v.get('公司') or not v.get(M.COMPANY_CODE_COL) or not v.get('范围'):
+            probs.append(where + ' 公司/公司编码/范围不能为空')
         if k in seen:
             probs.append(where + f' 与第{seen[k]}行重复：同一公司同一范围只能有一条规则')
         seen[k] = r['row']
@@ -895,13 +933,13 @@ def validate_quota(master):
     return probs
 
 
-def scope_rows(ctx, master, company, scope=None, plan=None):
+def scope_rows(ctx, master, company_code, scope=None, plan=None):
     out = []
     for name in ctx.sheets:
         s = sheet_of(master, name)
         idx = headers(s)
         for r in s['rows']:
-            if r['row'] == 1 or row_kind(r, idx) != 'role' or cell_value(r, idx[COMPANY_COL]) != company:
+            if r['row'] == 1 or row_kind(r, idx) != 'role' or cell_value(r, idx.get(M.COMPANY_CODE_COL, 0)) != company_code:
                 continue
             if scope not in (None, '公司总量'):
                 bu = cell_value(r, idx['所属BU']) if '所属BU' in idx else None
@@ -921,7 +959,7 @@ def refresh_quota_counts(ctx, master):
     counts = set(rule.get('countsStatuses', []))
     col = headers(sh)['当前投递数量']
     for r, v in quota_records(master):
-        rows = scope_rows(ctx, master, v['公司'], v['范围'], v.get('适用计划/批次'))
+        rows = scope_rows(ctx, master, v.get(M.COMPANY_CODE_COL), v['范围'], v.get('适用计划/批次'))
         set_cell(r, col, sum(1 for s_, idx, x in rows if cell_value(x, idx[ctx.column]) in counts))
 
 
@@ -929,8 +967,14 @@ def set_quota_rules(ctx, items):
     """按公司覆盖写名额表：输入里出现的公司，其旧规则整体删除，换成这一版（只保留最新）。"""
     master = ctx.load_master()
     sh = quota_sheet(master, create=True)
-    companies = {d['公司'] for d in items}
-    keep = [r for r in sh['rows'] if r['row'] == 1 or cell_value(r, headers(sh)['公司']) not in companies]
+    M.add_columns(sh, (M.COMPANY_CODE_COL,))
+    for d in items:  # 公司只按公司主数据认：名称或已确认别名完全一致，或直接给公司编码
+        code = d.get(M.COMPANY_CODE_COL) or M.resolve_company(master, d.get('公司'))
+        if not code or not M.company_name(master, code):
+            raise SystemExit(f"名额表的公司不在公司主数据中：{d.get('公司') or d.get(M.COMPANY_CODE_COL)}")
+        d[M.COMPANY_CODE_COL], d['公司'] = code, M.company_name(master, code)
+    companies = {d[M.COMPANY_CODE_COL] for d in items}
+    keep = [r for r in sh['rows'] if r['row'] == 1 or cell_value(r, headers(sh)[M.COMPANY_CODE_COL]) not in companies]
     bad = []
     for i, d in enumerate(items, start=1):
         unknown = set(d) - set(QUOTA_HEAD) - {QUOTE_SOURCE_KEY}
@@ -942,9 +986,10 @@ def set_quota_rules(ctx, items):
                 bad.append(where + prob)
     if bad:
         raise SystemExit('名额表门禁拒绝写入（共 %d 处）：\n' % len(bad) + '\n'.join(bad[:50]))
+    qidx = headers(sh)
     for d in items:
-        keep.append({'row': 0, 'cells': [{'column': QUOTA_HEAD.index(h) + 1, 'value': d[h], 'type': 'n' if isinstance(d[h], int) else 's'}
-                                          for h in QUOTA_HEAD if d.get(h) not in (None, '')]})
+        keep.append({'row': 0, 'cells': sorted(({'column': qidx[h], 'value': d[h], 'type': 'n' if isinstance(d[h], int) else 's'}
+                                                for h in QUOTA_HEAD if d.get(h) not in (None, '')), key=lambda c: c['column'])})
     head, body = keep[0], keep[1:]
     body.sort(key=lambda r: (str(cell_value(r, 1)), str(cell_value(r, 2))))
     for i, r in enumerate(body, start=2):
@@ -964,8 +1009,25 @@ def set_sheet_rows(ctx, sheet_name, rows):
         raise SystemExit('岗位表与名额表只能用对应的固定命令写入')
     if not rows or not all(isinstance(r, list) and r for r in rows) or any(v in (None, '') for v in rows[0]):
         raise SystemExit('输入须为二维列表，首行为非空表头')
+    if sheet_name in (M.COMPANY_SHEET, M.SITE_SHEET):
+        raise SystemExit('公司主数据与投递站点只能由编码命令维护')
     master = ctx.load_master()
     s = sheet_of(master, sheet_name)
+    head = list(rows[0])
+    if '公司' in head:  # 带公司列的表：每行按公司主数据补公司编码（名称或已确认别名完全一致；没有则新建公司编码）
+        if M.COMPANY_CODE_COL not in head:
+            head.append(M.COMPANY_CODE_COL)
+            rows = [head] + [list(r) + [None] * (len(head) - 1 - len(r)) + [None] for r in rows[1:]]
+        ci, ki = head.index('公司'), head.index(M.COMPANY_CODE_COL)
+        for r in rows[1:]:
+            r += [None] * (len(head) - len(r))
+            if r[ki]:
+                if not M.company_name(master, r[ki]):
+                    raise SystemExit(f'公司编码不存在：{r[ki]}')
+            elif r[ci]:
+                r[ki] = M.ensure_company(master, r[ci])
+            if r[ki]:
+                r[ci] = M.company_name(master, r[ki])
     s['rows'] = [{'row': i, 'cells': [{'column': j, 'value': v, 'type': 'n' if isinstance(v, (int, float)) else 's'}
                                         for j, v in enumerate(r, start=1) if v not in (None, '')]}
                  for i, r in enumerate(rows, start=1)]
@@ -984,8 +1046,8 @@ def drop_column(ctx, sheet_name, column_name):
     idx = headers(s)
     if column_name not in idx:
         return {'dropped': False}
-    if column_name in (COMPANY_COL, NAME_COL, LINK_COL, ctx.column):
-        raise SystemExit('不能删除业务键或投递状态列')
+    if column_name in (COMPANY_COL, NAME_COL, LINK_COL, ctx.column) + M.ROLE_SHEET_COLS + tuple(M.COMPANY_HEAD) + tuple(M.SITE_HEAD):
+        raise SystemExit('不能删除公司/岗位/链接、编码或投递状态列')
     col = idx[column_name]
     for r in s['rows']:
         r['cells'] = [c for c in r['cells'] if c['column'] != col]
@@ -1005,7 +1067,7 @@ def load_quotas(ctx, master):
     rule = ctx.cfg.get('quotaRule')
     if not rule:
         return None, []
-    qs = [{'company': v['公司'], 'scope': v['范围'], 'plan': v.get('适用计划/批次'), 'limit': v['投递上限']}
+    qs = [{'company': v.get(M.COMPANY_CODE_COL), 'name': v['公司'], 'scope': v['范围'], 'plan': v.get('适用计划/批次'), 'limit': v['投递上限']}
           for r, v in quota_records(master) if v.get('范围') == '公司总量' and isinstance(v.get('投递上限'), int)]
     return rule, qs
 
@@ -1018,17 +1080,17 @@ def quota_closure(ctx, master):
         return derived, over
     counts, sources, target = set(rule['countsStatuses']), set(rule['autoCloseFrom']), rule['autoCloseTo']
     for q in quotas:
-        scope = scope_rows(ctx, master, q['company'])
+        scope = scope_rows(ctx, master, q['company'])  # q['company'] 是公司编码
         used = [r for s, idx, r in scope if cell_value(r, idx[ctx.column]) in counts]
         if len(used) > q['limit']:
-            over.append(f"{q['company']}：已占用 {len(used)} 个，超过名额 {q['limit']}")
+            over.append(f"{q['name']}：已占用 {len(used)} 个，超过名额 {q['limit']}")
         if len(used) >= q['limit']:
             for s, idx, r in scope:
                 cur = cell_value(r, idx[ctx.column])
                 if cur in sources:
                     key = row_key(s['name'], r, idx)
                     derived.append({'key': key, 'from': cur, 'to': target, 'quota': q,
-                                    'text': f"{describe(key)}：当前状态是「{cur}」，更新状态是「{target}」"
+                                    'text': f"{describe(key, master)}：当前状态是「{cur}」，更新状态是「{target}」"
                                             f"（名额收口：本轮名额 {q['limit']} 已由用户选择占满）"})
     return derived, over
 
@@ -1066,77 +1128,102 @@ def confirm(ctx, items, quote, ref):
             'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
 
 
+def _company_code(master, key):
+    code = key.get('company_code') or key.get(M.COMPANY_CODE_COL)
+    if code:
+        if not M.company_name(master, code):
+            raise SystemExit(f'公司编码不存在：{code}')
+        return code
+    return M.ensure_company(master, key.get('company'))
+
+
+def _same_link(a, b):
+    return str(a or '').rstrip('/') == str(b or '').rstrip('/')
+
+
 def upsert(ctx, items):
+    """新增岗位行（分配岗位编码、对应站点）或按编码改非状态字段。
+    items：[{key, values}]，key 三种：
+      {code: 岗位编码}                                  改已有岗位行
+      {sheet, company|company_code, role: "new"}        新增岗位行（values 须含岗位名称或岗位链接）
+      {sheet, company|company_code}                     新增或修改该地区表的公司行
+    不能改：投递状态（走 propose/confirm）、岗位链接（走 relink）、投递链接（set-apply-link）、
+    志愿顺序（set-order）、各编码列、公司名（只在公司主数据改）。"""
     master = ctx.load_master()
+    M.ensure_structure(master, ctx.sheets)
     added = updated = 0
-    duplicates_removed = 0
     touched = []
     for d in items:
-        key = normalize_key(d['key'])
-        fields = d['values']
+        k, fields = d['key'], dict(d['values'])
         if ctx.column in fields:
             raise SystemExit('upsert 不能修改投递状态；状态变更必须走 propose→用户确认→confirm')
-        s = sheet_of(master, key['sheet'])
-        idx = headers(s)
-        unknown = set(fields) - set(idx)
-        if unknown:
-            raise SystemExit('未知表头：' + '、'.join(sorted(unknown)))
-        hits = [r for r in s['rows'] if r['row'] > 1 and all(
-            row_key(key['sheet'], r, idx).get(k) == v for k, v in key.items())]
-        if len(hits) > 1 and d.get('drop_empty_duplicates'):
-            if not key.get('link') or not key.get('title'):
-                raise SystemExit('清理空状态重复行必须同时提供岗位链接和岗位名称')
-            kept = [r for r in hits if cell_value(r, idx[ctx.column]) not in (None, '')]
-            if len(kept) != 1 or any(row_key(key['sheet'], r, idx) != key for r in hits):
-                raise SystemExit('只能清理同一完整业务键下、唯一有状态岗位旁的空状态重复行')
-            gone = [r for r in hits if r is not kept[0]]
-            removed = sorted(r['row'] for r in gone)
-            gone_ids = {id(r) for r in gone}
-            s['rows'] = [r for r in s['rows'] if id(r) not in gone_ids]
-            for r in s['rows']:
-                r['row'] -= sum(n < r['row'] for n in removed)
-            s['max_row'] = max(r['row'] for r in s['rows'])
-            duplicates_removed += len(gone)
-            hits = kept
-        if len(hits) > 1:
-            raise SystemExit('业务键匹配多行：' + key_id(key))
-        if hits:
-            row = hits[0]
+        locked = set(fields) & (set(M.LOCKED_COLS) | {COMPANY_COL})
+        if locked:
+            raise SystemExit('upsert 不能写这些列：' + '、'.join(sorted(locked)) + '（编码由脚本分配；投递链接用 set-apply-link；志愿顺序用 set-order；公司名只在公司主数据改）')
+        if isinstance(fields.get(M.CITY_COL), list):
+            fields[M.CITY_COL] = M.ALIAS_SEP.join(str(x) for x in fields[M.CITY_COL])
+        if k.get('code'):
+            key = resolve_key(ctx, master, k)
+            if M.kind_of(key['code']) != 'J':
+                raise SystemExit('按编码修改只用于岗位行；公司行用 {sheet, company|company_code}')
+            s, idx, row = find_row(ctx, master, key)
+            if LINK_COL in fields and not _same_link(fields[LINK_COL], cell_value(row, idx[LINK_COL])):
+                raise SystemExit(f'upsert 不能更换已有岗位的链接：{describe(key, master)}。请用 relink（先 --preview 给用户看，确认后带 --quote 执行）')
+            fields.pop(LINK_COL, None)
             updated += 1
         else:
-            # 公司行固定保留：新岗位不占用公司行，排在该公司最后；新公司行排在该公司最前
-            company_rows = [r for r in s['rows'] if r['row'] > 1 and cell_value(r, idx[COMPANY_COL]) == key['company']]
-            if key.get('placeholder') and company_rows:
-                at = min(r['row'] for r in company_rows)
-            elif company_rows:
-                at = max(r['row'] for r in company_rows) + 1
+            s = sheet_of(master, k['sheet'])
+            idx = headers(s)
+            ccode = _company_code(master, k)
+            company_rows = [r for r in s['rows'] if r['row'] > 1 and cell_value(r, idx[M.COMPANY_CODE_COL]) == ccode]
+            if k.get('role') == 'new':
+                link, title = fields.get(LINK_COL), fields.get(NAME_COL)
+                if not link and not title:
+                    raise SystemExit('新增岗位行须有岗位名称或岗位链接')
+                for name in ctx.sheets:
+                    s2 = sheet_of(master, name)
+                    i2 = headers(s2)
+                    for r in s2['rows']:
+                        if r['row'] > 1 and row_kind(r, i2) == 'role' and cell_value(r, i2[M.COMPANY_CODE_COL]) == ccode and (
+                                (link and _same_link(cell_value(r, i2[LINK_COL]), link)) or (not link and title and cell_value(r, i2[NAME_COL]) == title and not cell_value(r, i2[LINK_COL]))):
+                            raise SystemExit(f'该岗位已在主表：{cell_value(r, i2[M.ROLE_CODE_COL])}（{name}!{r["row"]}），请按岗位编码修改')
+                at = max(r['row'] for r in company_rows) + 1 if company_rows else max(r['row'] for r in s['rows']) + 1
+                row = insert_row(s, idx, at, company_rows[0] if company_rows else None)
+                set_cell(row, idx[M.COMPANY_CODE_COL], ccode)
+                set_cell(row, idx[COMPANY_COL], M.company_name(master, ccode))
+                jcode = M.next_code(master, 'J')
+                set_cell(row, idx[M.ROLE_CODE_COL], jcode)
+                if link:
+                    set_cell(row, idx[M.SITE_CODE_COL], M.ensure_site(master, ccode, M.origin(link)))
+                key = {'sheet': s['name'], 'code': jcode}
+                added += 1
             else:
-                at = max(r['row'] for r in s['rows']) + 1
-            row = insert_row(s, idx, at, company_rows[0] if company_rows else None)
-            added += 1
-            for col, v in ((COMPANY_COL, key['company']), (LINK_COL, key.get('link')), (NAME_COL, key.get('title'))):
-                if v and col in idx:
-                    set_cell(row, idx[col], v)
+                crow = next((r for r in company_rows if row_kind(r, idx) == 'company'), None)
+                if crow is None:
+                    at = min(r['row'] for r in company_rows) if company_rows else max(r['row'] for r in s['rows']) + 1
+                    crow = insert_row(s, idx, at, company_rows[0] if company_rows else None)
+                    set_cell(crow, idx[M.COMPANY_CODE_COL], ccode)
+                    set_cell(crow, idx[COMPANY_COL], M.company_name(master, ccode))
+                    added += 1
+                else:
+                    updated += 1
+                if set(fields) & {LINK_COL, NAME_COL}:
+                    raise SystemExit('公司行不能写岗位名称或岗位链接；新增岗位用 role: "new"')
+                row, key = crow, row_key(s['name'], crow, idx)
         for col, v in fields.items():
-            if col == NOTE_COL and NOTE_COL in idx:
+            if col not in idx:
+                raise SystemExit('未知表头：' + col)
+            if col == NOTE_COL:
                 cur_note = str(cell_value(row, idx[NOTE_COL]) or '')
                 if (str(v or '').startswith(LINK_EXCEPTION_PREFIX) or cur_note.startswith(LINK_EXCEPTION_PREFIX)) and str(v or '') != cur_note:
-                    raise SystemExit(f'upsert 不能写入或修改链接例外备注：{describe(key)}。“{LINK_EXCEPTION_PREFIX}”开头的备注只能用 '
+                    raise SystemExit(f'upsert 不能写入或修改链接例外备注：{describe(key, master)}。“{LINK_EXCEPTION_PREFIX}”开头的备注只能用 '
                                      'link-exception（先 --preview 给用户看，确认后带 --quote 执行）')
-            if (col == LINK_COL and hits and v not in (None, '')
-                    and str(v) != str(cell_value(row, idx[LINK_COL]) or '')):
-                raise SystemExit(f'upsert 不能更换已有岗位的链接：{describe(key)}。岗位链接是行身份的一部分，'
-                                 '请用 relink（先 --preview 给用户看“岗位链接 X → Y”，确认后带 --quote 执行）')
             if isinstance(v, str) and len(v) > 32767:
                 raise SystemExit('禁止截断单元格')
             if col in ctx.field_rules and v not in (None, ''):
-                kind = 'role' if (key.get('link') or key.get('title')) else 'company'
-                err = check_field(ctx, col, v, kind)
+                err = check_field(ctx, col, v, 'role' if M.kind_of(key['code']) == 'J' else 'company')
                 if err:
-                    raise SystemExit(f'字段门禁：{describe(key)} {err}')
-            if col == LINK_COL and v in (None, ''):
-                row['cells'] = [c for c in row['cells'] if c['column'] != idx[col]]  # 连同超链接一起清除
-                continue
+                    raise SystemExit(f'字段门禁：{describe(key, master)} {err}')
             set_cell(row, idx[col], v)
         link = cell_value(row, idx[LINK_COL]) if LINK_COL in idx else None
         if link:
@@ -1150,16 +1237,21 @@ def upsert(ctx, items):
             if field in idx and (field in (NAME_COL, LINK_COL) or cell_value(row, idx[field]) not in (None, '')):
                 err = check_field(ctx, field, cell_value(row, idx[field]), kind)
                 if err:
-                    errors.append(f'{describe(key)} {err}')
+                    errors.append(f'{describe(key, master)} {err}')
     if errors:
         raise SystemExit('字段门禁拒绝写入主数据（共 %d 处）：\n' % len(errors) + '\n'.join(errors[:50]))
     created = []
     for s, idx, row, key in touched:
-        if ensure_company_row(s, idx, key['company']):
-            created.append(f"{s['name']}｜{key['company']}")
+        ccode = cell_value(row, idx[M.COMPANY_CODE_COL])
+        if ensure_company_row(s, idx, ccode):
+            created.append(f"{s['name']}｜{M.company_name(master, ccode)}")
+    probs = validate_codes(ctx, master)
+    if probs:
+        raise SystemExit('编码门禁拒绝写入主数据：\n' + '\n'.join(probs[:30]))
     refresh_digest(master)
     save_master(ctx, master)
-    return {'added': added, 'updated': updated, 'duplicates_removed': duplicates_removed, 'company_rows_created': created,
+    return {'added': added, 'updated': updated, 'company_rows_created': created,
+            'codes': [key['code'] for _, _, _, key in touched],
             'note': '新增行（含自动补的公司行）投递状态为空：必须向用户展示“当前状态是空，更新状态是Y”并确认后，才能写入 Excel'}
 
 
@@ -1179,51 +1271,77 @@ def insert_row(s, idx, at, template=None):
     return row
 
 
-def ensure_company_row(s, idx, company):
+def ensure_company_row(s, idx, company_code):
     """方案B：公司在该表有行但缺公司行时，在该公司最前面补一行公司行（状态为空，须经用户确认）。返回是否新建。"""
-    rows = [r for r in s['rows'] if r['row'] > 1 and cell_value(r, idx[COMPANY_COL]) == company]
+    rows = [r for r in s['rows'] if r['row'] > 1 and cell_value(r, idx[M.COMPANY_CODE_COL]) == company_code]
     if not rows or any(row_kind(r, idx) == 'company' for r in rows):
         return False
     first = min(rows, key=lambda r: r['row'])
-    insert_row(s, idx, first['row'], first)
+    row = insert_row(s, idx, first['row'], first)
+    for col in (M.ROLE_CODE_COL, M.SITE_CODE_COL, M.APPLY_COL, M.ORDER_COL, M.CITY_COL):
+        set_cell(row, idx[col], None)
     return True
 
 
-HANDED_OFF = ('已交接', '进行中')
+HANDED_OFF = ('已交接', '进行中', '等待反向评审')
+
+
+def active_batch_codes(ctx):
+    """处于交接流程中的批次所选岗位及其站点：这些值一改，该公司的交接确认就失效，须走
+    company_store.py apply-observations（同一次确认里重写交接文件并按“链接”作用域重新确认）。"""
+    base = ctx.root / (ctx.cfg.get('companyStore') or {}).get('dir', '岗位交接/公司')
+    codes = set()
+    for f in base.glob('C*.json'):
+        try:
+            d = json.loads(f.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        b = d.get('批次') or {}
+        if b.get('状态') in HANDED_OFF:
+            chosen = set(b.get('选中岗位') or [])
+            codes |= chosen | {r.get('站点编码') for r in d.get('岗位', []) if r.get('岗位编码') in chosen}
+    return codes
+
+
+def _guard_batch(ctx, codes, allow_in_batch, master):
+    hit = sorted(set(codes) & active_batch_codes(ctx)) if not allow_in_batch else []
+    if hit:
+        raise SystemExit('这些岗位/站点在进行中的投递批次里：' + '、'.join(hit) +
+                         '。改它们的链接须用 company_store.py apply-observations（预览 → 用户确认，同时按“链接”作用域重新确认该公司批次）')
 
 
 def link_exception(ctx, items, quote, preview=False):
     """登记或撤销链接例外（官网没有独立的岗位详情页）。备注写成固定格式「用户例外保留：官网无独立详情页。<定位说明>」，
     forward 据此不检查该岗位链接是否为具体岗位页（仍须 https 官网、带官方岗位ID、不与同公司其它岗位共用）。
     preview 只返回给用户看的逐行变更；用户确认后带原话执行，确认记入台账（每行只留最新一条）。
-    items：[{sheet,company,link,title,定位说明}]；撤销时给 "撤销": true。"""
+    items：[{code: 岗位编码, 定位说明}]；撤销时给 "撤销": true。"""
     if not preview and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户确认原话')
     master = ctx.load_master()
     plan, lines = [], []
     for d in items:
-        key = normalize_key({k: d.get(k) for k in ('sheet', 'company', 'link', 'title')})
-        if key.get('placeholder'):
-            raise SystemExit(f'{describe(key)} 是公司行，不能登记链接例外')
+        key = resolve_key(ctx, master, {'code': d.get('code'), 'sheet': d.get('sheet')})
+        if M.kind_of(key['code']) != 'J':
+            raise SystemExit(f'{describe(key, master)} 是公司行，不能登记链接例外')
         s, idx, row = find_row(ctx, master, key)
         if NOTE_COL not in idx:
             raise SystemExit(f"{s['name']} 没有“{NOTE_COL}”列")
         cur = str(cell_value(row, idx[NOTE_COL]) or '')
         if d.get('撤销'):
             if not cur.startswith(LINK_EXCEPTION_PREFIX):
-                raise SystemExit(f'{describe(key)} 当前备注不是链接例外，无需撤销')
+                raise SystemExit(f'{describe(key, master)} 当前备注不是链接例外，无需撤销')
             new, effect = None, '生成投递批次时恢复检查该岗位链接是否为具体岗位页'
         else:
             how = str(d.get('定位说明') or '').strip()
             if len(how) < 4:
-                raise SystemExit(f'{describe(key)} 须写明定位说明：官网上如何找到这个岗位（如“列表页按 positionId 定位，点岗位名展开 JD”）')
+                raise SystemExit(f'{describe(key, master)} 须写明定位说明：官网上如何找到这个岗位（如“列表页按 positionId 定位，点岗位名展开 JD”）')
             if cur and not cur.startswith(LINK_EXCEPTION_PREFIX):
-                raise SystemExit(f'{describe(key)} 已有其它用途的备注「{cur}」，备注只能放一条，请先与用户确认保留哪一条')
+                raise SystemExit(f'{describe(key, master)} 已有其它用途的备注「{cur}」，备注只能放一条，请先与用户确认保留哪一条')
             new, effect = LINK_EXCEPTION_PREFIX + how, '生成投递批次时不检查该岗位链接是否为具体岗位页'
             err = check_field(ctx, NOTE_COL, new, 'role')
             if err:
-                raise SystemExit(f'字段门禁：{describe(key)} {err}')
-        line = f"{describe(key)}：备注「{cur or '空'}」→「{new or '空'}」（{effect}）"
+                raise SystemExit(f'字段门禁：{describe(key, master)} {err}')
+        line = f"{describe(key, master)}：备注「{cur or '空'}」→「{new or '空'}」（{effect}）"
         plan.append((s, idx, row, key, new, line))
         lines.append(line)
     if preview:
@@ -1245,99 +1363,174 @@ def link_exception(ctx, items, quote, preview=False):
             'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
 
 
-def relink(ctx, items, quote, preview=False, allow_in_batch=False):
-    """更换已有岗位行的岗位链接。岗位链接是行身份的一部分，所以换链接不走 upsert：
-    preview 只返回给用户看的逐行“岗位链接 X → Y”，不改任何文件；用户确认后带原话执行——
-    改链接与超链接；把该行的确认记录迁到新业务键；登记身份变更（写 Excel 时据此认出同一行，状态不变、无需重新确认）；
-    把 公司.json 里的行身份迁到新链接（志愿顺序、城市选项等随行保留）。
-    该岗位在已交接/进行中的投递批次里时拒绝，须先完成投递与反向评审。"""
-    if not preview and (not quote or not quote.strip()):
-        raise SystemExit('必须提供用户确认原话')
-    master = ctx.load_master()
-    store = ctx.cfg.get('companyStore') or {}
-    batch_file = ctx.root / store.get('batchFile', '岗位交接/投递批次.json')
-    batch = json.loads(batch_file.read_text(encoding='utf-8')) if batch_file.exists() else None
-    plan, lines, taken = [], [], set()
-    for d in items:
-        old_key = normalize_key({k: d.get(k) for k in ('sheet', 'company', 'link', 'title')})
-        if old_key.get('placeholder'):
-            raise SystemExit(f'{describe(old_key)} 是公司行，没有岗位链接可换')
-        s, idx, row = find_row(ctx, master, old_key)
-        if LINK_COL not in idx:
-            raise SystemExit(f"{s['name']} 没有“{LINK_COL}”列")
-        old = str(cell_value(row, idx[LINK_COL]) or '')
-        new = str(d.get('new_link') or '').strip()
-        if not re.fullmatch(r'https://\S+', new):
-            raise SystemExit(f'{describe(old_key)} 新链接必须是完整的 https 链接：{new!r}')
-        if new.rstrip('/') == old.rstrip('/'):
-            raise SystemExit(f'{describe(old_key)} 新旧链接相同')
-        norm = (s['name'], old_key['company'], new.rstrip('/'))
-        clash = [r['row'] for r in s['rows'] if r['row'] > 1 and r is not row
-                 and cell_value(r, idx[COMPANY_COL]) == old_key['company']
-                 and str(cell_value(r, idx[LINK_COL]) or '').rstrip('/') == new.rstrip('/')]
-        if clash or norm in taken:
-            raise SystemExit(f'{describe(old_key)} 新链接已被同公司其它行使用' + (f'（第{clash[0]}行）' if clash else '（本次输入重复）'))
-        taken.add(norm)
-        status = cell_value(row, idx[ctx.column]) or ''
-        in_batch = bool(batch) and old and any(
-            c.get('公司') == old_key['company'] and str(r.get('岗位链接') or '').rstrip('/') == old.rstrip('/')
-            for c in batch.get('companies', []) for r in c.get('岗位', []))
-        if in_batch and batch.get('state') in HANDED_OFF and not allow_in_batch:
-            raise SystemExit(f"{describe(old_key)} 在已交接的投递批次 {batch.get('batchId')} 中（{batch.get('state')}），"
-                             '须先完成投递与反向评审再换链接')
-        new_key = {**old_key, 'link': new}
-        line = (f"{describe(old_key)}：岗位链接「{old or '空'}」→「{new}」"
-                f"（投递状态「{status or '空'}」保持不变，志愿顺序等投递数据随行迁移）")
-        if in_batch and not allow_in_batch:
-            line += f"；该岗位在待评审批次 {batch.get('batchId')} 中，换链接后须重新生成批次（forward）"
-        plan.append((s, idx, row, old_key, new_key, new, line))
-        lines.append(line)
-    if preview:
-        return {'show_user_exactly': lines,
-                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行'}
+def _confirm_values(ctx, master, plan, quote, ref):
+    """把用户确认过的值写入主表，并在台账里按（编码, 字段）只留最新一条确认。plan：[(row, col, value, code, field, line)]。"""
     ledger = ctx.ledger()
-    changes = ledger.setdefault('identity_changes', [])
+    records = ledger.setdefault('value_confirmations', [])
     at = now()
-    for s, idx, row, old_key, new_key, new, line in plan:
-        set_cell(row, idx[LINK_COL], new)
-        cell = next(c for c in row['cells'] if c['column'] == idx[LINK_COL])
-        cell['hyperlink'] = {'target': new, 'location': None}
-        ok, nk = key_id(old_key), key_id(new_key)
-        for e in ledger['entries'] + ledger.get('link_exceptions', []):
-            if key_id(e['key']) == ok:
-                e['key'] = new_key
-        prior = next((c for c in changes if not c.get('applied_at') and key_id(c['new_key']) == ok), None)
-        if prior and key_id(prior['old_key']) == nk:  # 改回 Excel 里的原链接：不再需要身份变更
-            changes.remove(prior)
-        elif prior:  # 写 Excel 前连续换了两次：仍从 Excel 里的原键直接指向最新键
-            prior.update({'new_key': new_key, 'shown_to_user': line, 'user_quote': quote.strip(), 'confirmed_at': at})
+    for row, col, value, code, field, line in plan:
+        if value in (None, ''):  # 清空连同超链接一起去掉
+            row['cells'] = [c for c in row['cells'] if c['column'] != col]
         else:
-            changes.append({'id': uuid.uuid4().hex, 'old_key': old_key, 'new_key': new_key, 'shown_to_user': line,
-                            'user_quote': quote.strip(), 'confirmed_at': at, 'applied_at': None})
-    moved = []
-    base = ctx.root / store.get('dir', '岗位交接/公司')
-    if base.exists():
-        remap = {key_id(o): n for _, _, _, o, n, _, _ in plan}
-        for cf in sorted(base.glob('*/*/公司.json')):
-            doc = json.loads(cf.read_text(encoding='utf-8'))
-            hit = False
-            for r in doc.get('roles', []):
-                nk = remap.get(key_id(r.get('主表行身份') or {}))
-                if nk:
-                    r['主表行身份'] = nk
-                    hit = True
-                    moved.append(describe(nk))
-            if hit:
-                doc['updatedAt'] = at
-                save_json(cf, doc)
-    probs = validate_labels(ctx, master)
+            set_cell(row, col, value)
+            if field in (LINK_COL, M.APPLY_COL):
+                next(c for c in row['cells'] if c['column'] == col)['hyperlink'] = {'target': value, 'location': None}
+        records[:] = [e for e in records if (e['code'], e['field']) != (code, field)]
+        records.append({'code': code, 'field': field, 'value': value, 'shown_to_user': line,
+                        'user_quote': quote.strip(), 'confirmation_ref': ref, 'confirmed_at': at})
+    probs = validate_codes(ctx, master)
     if probs:
-        raise SystemExit('标签门禁拒绝：' + '；'.join(probs[:10]))
+        raise SystemExit('编码门禁拒绝（未写入任何文件）：' + '；'.join(probs[:10]))
     refresh_digest(master)
     save_master(ctx, master)
     save_json(ctx.ledger_path, ledger)
-    return {'relinked': len(plan), 'company_files_updated': moved, 'excel_written': False,
-            'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
+
+
+def _check_https(value, what):
+    if not re.fullmatch(r'https://\S+', str(value or '')):
+        raise SystemExit(f'{what} 必须是完整的 https 链接：{value!r}')
+
+
+def relink(ctx, items, quote, preview=False, allow_in_batch=False):
+    """更换已有岗位行的岗位链接（按岗位编码）。编码不变，引用它的记录都不受影响。
+    新链接在同一站点：只覆盖值；在新域名：按“新域名 = 新站点”规则对应到该公司的站点（没有就新建），岗位改挂新站点，
+    原投递链接属于旧站点，一并清空。preview 只返回逐行“岗位链接 X → Y”，用户确认后带原话执行。
+    items：[{code: 岗位编码, new_link}]。"""
+    if not preview and (not quote or not quote.strip()):
+        raise SystemExit('必须提供用户确认原话')
+    master = ctx.load_master()
+    plan, lines, taken = [], [], set()
+    for d in items:
+        key = resolve_key(ctx, master, {'code': d.get('code'), 'sheet': d.get('sheet')})
+        if M.kind_of(key['code']) != 'J':
+            raise SystemExit(f'{describe(key, master)} 是公司行，没有岗位链接可换')
+        s, idx, row = find_row(ctx, master, key)
+        old = str(cell_value(row, idx[LINK_COL]) or '')
+        new = str(d.get('new_link') or '').strip()
+        _check_https(new, describe(key, master) + ' 新链接')
+        if _same_link(new, old):
+            raise SystemExit(f'{describe(key, master)} 新旧链接相同')
+        ccode = cell_value(row, idx[M.COMPANY_CODE_COL])
+        for name in ctx.sheets:
+            s2 = sheet_of(master, name)
+            i2 = headers(s2)
+            clash = [r['row'] for r in s2['rows'] if r['row'] > 1 and r is not row and cell_value(r, i2[M.COMPANY_CODE_COL]) == ccode
+                     and _same_link(cell_value(r, i2[LINK_COL]), new)]
+            if clash or (ccode, new.rstrip('/')) in taken:
+                raise SystemExit(f'{describe(key, master)} 新链接已被同公司其它岗位使用' + (f'（{name}!{clash[0]}）' if clash else '（本次输入重复）'))
+        taken.add((ccode, new.rstrip('/')))
+        old_site = cell_value(row, idx[M.SITE_CODE_COL])
+        same_site = M.origin(new) == (M.sites(master).get(old_site) or {}).get('站点')
+        line = (f"{describe(key, master)}：岗位链接「{old or '空'}」→「{new}」（岗位编码不变，投递状态不变）"
+                + ('' if same_site else f"；新链接在另一个域名 {M.origin(new)}，岗位改挂该域名的站点，原投递链接清空"))
+        plan.append((s, idx, row, key, new, same_site, line))
+        lines.append(line)
+    _guard_batch(ctx, [key['code'] for _, _, _, key, *_ in plan], allow_in_batch, master)
+    if preview:
+        return {'show_user_exactly': lines,
+                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行'}
+    values = []
+    for s, idx, row, key, new, same_site, line in plan:
+        values.append((row, idx[LINK_COL], new, key['code'], LINK_COL, line))
+        if not same_site:
+            values.append((row, idx[M.SITE_CODE_COL], M.ensure_site(master, cell_value(row, idx[M.COMPANY_CODE_COL]), M.origin(new)),
+                           key['code'], M.SITE_CODE_COL, line))
+            values.append((row, idx[M.APPLY_COL], None, key['code'], M.APPLY_COL, line))
+    _confirm_values(ctx, master, values, quote, 'relink')
+    return {'relinked': [key['code'] for _, _, _, key, *_ in plan], 'excel_written': False,
+            'next': '运行 company_store.py refresh 重新生成交接文件；对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
+
+
+def set_apply_link(ctx, items, quote, preview=False, allow_in_batch=False):
+    """写入或更换岗位的投递链接（申请页地址）。只接受岗位所在站点的 https 地址。
+    items：[{code: 岗位编码, 投递链接: url|null}]。"""
+    if not preview and (not quote or not quote.strip()):
+        raise SystemExit('必须提供用户确认原话')
+    master = ctx.load_master()
+    plan, lines = [], []
+    for d in items:
+        key = resolve_key(ctx, master, {'code': d.get('code'), 'sheet': d.get('sheet')})
+        if M.kind_of(key['code']) != 'J':
+            raise SystemExit(f'{describe(key, master)} 不是岗位行')
+        s, idx, row = find_row(ctx, master, key)
+        new = d.get(M.APPLY_COL)
+        site = M.sites(master).get(cell_value(row, idx[M.SITE_CODE_COL])) or {}
+        if new is not None:
+            _check_https(new, describe(key, master) + ' 投递链接')
+            if M.origin(new) != site.get('站点'):
+                raise SystemExit(f'{describe(key, master)} 投递链接不在岗位所在站点 {site.get("站点")}：{new}')
+        cur = cell_value(row, idx[M.APPLY_COL])
+        if (cur or None) == (new or None):
+            continue
+        line = f"{describe(key, master)}：投递链接「{cur or '空'}」→「{new or '空'}」"
+        plan.append((row, idx[M.APPLY_COL], new, key['code'], M.APPLY_COL, line))
+        lines.append(line)
+    _guard_batch(ctx, [p[3] for p in plan], allow_in_batch, master)
+    if preview:
+        return {'show_user_exactly': lines,
+                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行'}
+    _confirm_values(ctx, master, plan, quote, 'set-apply-link')
+    return {'updated': [p[3] for p in plan], 'excel_written': False}
+
+
+SITE_LINK_FIELDS = ('登录链接', '账号核对页')
+
+
+def set_site_links(ctx, items, quote, preview=False, allow_in_batch=False):
+    """写入或更换站点的登录链接、账号核对页（按站点编码）。登录链接可为空（该站点没有单独的登录界面，只能在岗位页登录）。
+    items：[{code: 站点编码, 登录链接?: url|null, 账号核对页?: url}]。"""
+    if not preview and (not quote or not quote.strip()):
+        raise SystemExit('必须提供用户确认原话')
+    master = ctx.load_master()
+    all_sites = M.sites(master)
+    site_sheet = sheet_of(master, M.SITE_SHEET)
+    sidx = headers(site_sheet)
+    plan, lines = [], []
+    for d in items:
+        code = d.get('code')
+        site = all_sites.get(code)
+        if not site:
+            raise SystemExit(f'站点编码不存在：{code}')
+        for field in SITE_LINK_FIELDS:
+            if field not in d:
+                continue
+            new = d[field]
+            if new is not None:
+                _check_https(new, f'{code} {field}')
+                if M.origin(new) != site['站点']:
+                    raise SystemExit(f'{code} {field}不在本站点 {site["站点"]}：{new}')
+            elif field == '账号核对页':
+                raise SystemExit(f'{code} 账号核对页不能为空')
+            if (site[field] or None) == (new or None):
+                continue
+            line = f"{M.company_name(master, site['公司编码'])}｜站点 {site['站点']}（{code}）：{field}「{site[field] or '空'}」→「{new or '空'}」"
+            plan.append((site['row'], sidx[field], new, code, field, line))
+            lines.append(line)
+    _guard_batch(ctx, [p[3] for p in plan], allow_in_batch, master)
+    if preview:
+        return {'show_user_exactly': lines,
+                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行'}
+    _confirm_values(ctx, master, plan, quote, 'set-site-links')
+    return {'updated': sorted({p[3] for p in plan}), 'excel_written': False}
+
+
+def set_order(ctx, items, quote):
+    """写入用户给定的志愿顺序（正整数）或清除（null）。分组校验由 company_store 负责。items：[{code: 岗位编码, 志愿顺序}]。"""
+    if not quote or not quote.strip():
+        raise SystemExit('必须提供用户给定顺序的原话')
+    master = ctx.load_master()
+    plan = []
+    for d in items:
+        key = resolve_key(ctx, master, {'code': d.get('code'), 'sheet': d.get('sheet')})
+        if M.kind_of(key['code']) != 'J':
+            raise SystemExit(f'{describe(key, master)} 不是岗位行')
+        v = d.get(M.ORDER_COL)
+        if v is not None and (not isinstance(v, int) or isinstance(v, bool) or v < 1):
+            raise SystemExit(f'志愿顺序必须是正整数：{d}')
+        s, idx, row = find_row(ctx, master, key)
+        plan.append((row, idx[M.ORDER_COL], v, key['code'], M.ORDER_COL, f"{describe(key, master)}：志愿顺序 → {v or '清除'}"))
+    _confirm_values(ctx, master, plan, quote, 'set-order')
+    return {'updated': [p[3] for p in plan]}
 
 
 KEEP_STATUSES = ('岗位已投递', '岗位推进中', '岗位offer', '岗位终止')
@@ -1350,35 +1543,39 @@ def reset_rows(ctx, items, quote, preview=False, master=None, drop_companies=(),
     if not preview and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户确认原话')
     master = master if master is not None else ctx.load_master()
+    drop_companies = {M.resolve_company(master, c) if M.kind_of(c) != 'C' else c for c in drop_companies}
     lines, dropped, placeholders = [], [], []
     by_sheet = {}
     for d in items:
-        key = normalize_key(d)
+        key = resolve_key(ctx, master, d)
+        if M.kind_of(key['code']) != 'J':
+            raise SystemExit(f'{describe(key, master)} 是公司行；reset-rows 只删岗位行')
         s, idx, row = find_row(ctx, master, key)
         st = cell_value(row, idx[ctx.column]) or ''
         if st in KEEP_STATUSES:
-            raise SystemExit(f'{describe(key)} 状态为「{st}」，有真实投递记录，不能删除')
-        by_sheet.setdefault(s['name'], []).append((key, row))
-        lines.append(f'{describe(key)}：当前状态是「{st or "空"}」，更新为「删除该行」')
+            raise SystemExit(f'{describe(key, master)} 状态为「{st}」，有真实投递记录，不能删除')
+        by_sheet.setdefault(s['name'], []).append((key, row, cell_value(row, idx[M.COMPANY_CODE_COL])))
+        lines.append(f'{describe(key, master)}：当前状态是「{st or "空"}」，更新为「删除该行」')
     resets = []  # 已有公司行改回“待搜索”：(sheet, row, key, from, keepRules)
     for name, pairs in by_sheet.items():
         s = sheet_of(master, name)
         idx = headers(s)
-        gone = {id(r) for _, r in pairs}
-        for company in dict.fromkeys(k['company'] for k, _ in pairs):
-            rest = [r for r in s['rows'] if r['row'] > 1 and id(r) not in gone and cell_value(r, idx[COMPANY_COL]) == company]
+        gone = {id(r) for _, r, _ in pairs}
+        for ccode in dict.fromkeys(c for _, _, c in pairs):
+            company = M.company_name(master, ccode)
+            rest = [r for r in s['rows'] if r['row'] > 1 and id(r) not in gone and cell_value(r, idx[M.COMPANY_CODE_COL]) == ccode]
             crow = next((r for r in rest if row_kind(r, idx) == 'company'), None)
             roles_left = [r for r in rest if row_kind(r, idx) == 'role']
-            ckey = {'sheet': name, 'company': company, 'placeholder': True}
-            if not roles_left and company in drop_companies:
+            ckey = {'sheet': name, 'code': ccode}
+            if not roles_left and ccode in drop_companies:
                 if crow is not None:
                     gone.add(id(crow))
-                placeholders.append((s, None, {'sheet': name, 'company': company, 'dropped': True}))
+                placeholders.append((s, None, {'sheet': name, 'code': ccode, 'dropped': True}))
                 lines.append(f'{name}｜{company}：整家删除（含公司行），并删除该公司名额规则')
             elif mark_research or not roles_left:
                 note = '（该公司需重新搜索；保留其余岗位与名额规则）' if roles_left else '（公司退回待搜索，并删除该公司名额规则）'
                 if crow is None:  # 旧数据缺公司行：补一行
-                    first = next(r for k, r in pairs if k['company'] == company)
+                    first = next(r for _, r, c in pairs if c == ccode)
                     ph = {'row': first['row'], 'cells': [dict(c) for c in first['cells'] if c['column'] in
                                                         [idx[h] for h in COMPANY_INFO_COLS if h in idx]]}
                     set_cell(ph, idx[ctx.column], '待搜索')
@@ -1391,9 +1588,8 @@ def reset_rows(ctx, items, quote, preview=False, master=None, drop_companies=(),
         dropped.append((s, gone))
     if preview:
         return {'show_user_exactly': lines}
-    deleted_keys = {key_id(k) for ps in by_sheet.values() for k, _ in ps}
-    deleted_keys |= {key_id({'sheet': k['sheet'], 'company': k['company'], 'placeholder': True})
-                     for _, ph, k in placeholders if ph is None}
+    deleted_keys = {key_id(k) for ps in by_sheet.values() for k, _, _ in ps}
+    deleted_keys |= {key_id({'sheet': k['sheet'], 'code': k['code']}) for _, ph, k in placeholders if ph is None}
     for s, crow, ckey, cur, keep in resets:
         set_cell(crow, headers(s)[ctx.column], '待搜索')
     for s, gone in dropped:
@@ -1407,9 +1603,9 @@ def reset_rows(ctx, items, quote, preview=False, master=None, drop_companies=(),
         s['max_row'] = max(r['row'] for r in keep)
     qs = quota_sheet(master)
     if qs and (placeholders or resets):
-        drop = {k['company'] for _, _, k in placeholders if not k.get('keepRules')} | {k['company'] for _, _, k, _, keep in resets if not keep}
+        drop = {k['code'] for _, _, k in placeholders if not k.get('keepRules')} | {k['code'] for _, _, k, _, keep in resets if not keep}
         qi = headers(qs)
-        qs['rows'] = [r for r in qs['rows'] if r['row'] == 1 or cell_value(r, qi['公司']) not in drop]
+        qs['rows'] = [r for r in qs['rows'] if r['row'] == 1 or cell_value(r, qi[M.COMPANY_CODE_COL]) not in drop]
         for i, r in enumerate(qs['rows'], start=1):
             r['row'] = i
         qs['max_row'] = len(qs['rows'])
@@ -1428,7 +1624,7 @@ def reset_rows(ctx, items, quote, preview=False, master=None, drop_companies=(),
     for s, crow, key, cur, keep in resets:
         ledger['entries'] = [e for e in ledger['entries'] if key_id(e['key']) != key_id(key)]
         ledger['entries'].append({'id': str(uuid.uuid4()), 'key': key, 'from': cur, 'from_excel': '', 'to': '待搜索',
-                                  'shown_to_user': f"{describe(key)}：当前状态是「{cur or '空'}」，更新状态是「待搜索」",
+                                  'shown_to_user': f"{describe(key, master)}：当前状态是「{cur or '空'}」，更新状态是「待搜索」",
                                   'user_quote': quote.strip(), 'confirmation_ref': 'reset-rows', 'confirmed_at': at})
     probs = validate_labels(ctx, master)
     if probs:
@@ -1436,8 +1632,8 @@ def reset_rows(ctx, items, quote, preview=False, master=None, drop_companies=(),
     save_master(ctx, master)
     save_json(ctx.ledger_path, ledger)
     return {'deleted_rows': sum(len(g) for _, g in dropped),
-            'companies_reset': [k['company'] for _, ph, k in placeholders if ph is not None] + [k['company'] for _, _, k, _, _ in resets],
-            'companies_dropped': [k['company'] for _, ph, k in placeholders if ph is None]}
+            'companies_reset': [M.company_name(master, k['code']) for _, ph, k in placeholders if ph is not None] + [M.company_name(master, k['code']) for _, _, k, _, _ in resets],
+            'companies_dropped': [M.company_name(master, k['code']) for _, ph, k in placeholders if ph is None]}
 
 
 def clear_orphans(ctx, rows, quote):
@@ -1511,7 +1707,7 @@ def query_rows(ctx, company=None, sheet=None, offset=0, limit=30):
             if r['row'] == 1:
                 continue
             values = {names.get(c['column'], str(c['column'])): c['value'] for c in r['cells']}
-            if company and values.get('公司') != company:
+            if company and company not in (values.get('公司'), values.get(M.COMPANY_CODE_COL)):
                 continue
             out.append({'sheet': s['name'], 'row': r['row'], 'values': values})
     return {'total': len(out), 'offset': offset, 'rows': out[offset:offset + limit]}
@@ -1528,6 +1724,10 @@ def company_report(ctx, company):
     """只读：从主数据汇总一家公司的汇报口径（主链接、计划、管培/产培、岗位按状态、名额与占用）。"""
     master = ctx.load_master()
     counts = set((ctx.cfg.get('quotaRule') or {}).get('countsStatuses', []))
+    code = company if M.kind_of(company) == 'C' else M.resolve_company(master, company)
+    if not code:
+        raise SystemExit('公司主数据中没有这家公司: ' + company)
+    company = M.company_name(master, code)
 
     def rows_of(name):
         sh = next((s for s in master['sheets'] if s['name'] == name), None)
@@ -1535,20 +1735,20 @@ def company_report(ctx, company):
             return []
         idx = headers(sh)
         return [{h: _plain(cell_value(r, c)) for h, c in idx.items()} for r in sh['rows']
-                if r['row'] > 1 and cell_value(r, idx.get(COMPANY_COL, 0)) == company]
+                if r['row'] > 1 and cell_value(r, idx.get(M.COMPANY_CODE_COL, 0)) == code]
     roles, placeholder, regions = [], None, []
     for name in ctx.sheets:
         s = sheet_of(master, name)
         idx = headers(s)
         for r in s['rows']:
-            if r['row'] == 1 or cell_value(r, idx[COMPANY_COL]) != company:
+            if r['row'] == 1 or cell_value(r, idx.get(M.COMPANY_CODE_COL, 0)) != code:
                 continue
             regions.append(name)
             v = {h: cell_value(r, c) for h, c in idx.items()}
             if row_kind(r, idx) == 'company':
                 placeholder = v.get(ctx.column)
             else:
-                roles.append({k: v.get(k) for k in ('岗位名称', '工作地点', '所属BU', '校招计划', ctx.column, '投递截止', '岗位链接')})
+                roles.append({k: v.get(k) for k in (M.ROLE_CODE_COL, '岗位名称', '工作地点', '所属BU', '校招计划', ctx.column, '投递截止', '岗位链接', M.APPLY_COL)})
     if not regions:
         raise SystemExit('主数据中没有这家公司: ' + company)
     plans = rows_of('校招计划')
@@ -1557,12 +1757,14 @@ def company_report(ctx, company):
         by_status[r[ctx.column] or '（空）'] = by_status.get(r[ctx.column] or '（空）', 0) + 1
     quotas = []
     for _, v in quota_records(master):
-        if v.get('公司') != company:
+        if v.get(M.COMPANY_CODE_COL) != code:
             continue
         lim, cur = v.get('投递上限'), v.get('当前投递数量')
         quotas.append({**{k: v.get(k) for k in ('范围', '适用计划/批次', '投递上限', '当前投递数量', '是否分BU可平行投递', '是否可以滚动投递')},
                        '剩余': lim - (cur or 0) if isinstance(lim, int) else '公司未披露'})
-    return {'公司': company, '地区表': sorted(set(regions)), '公司行状态': placeholder,
+    return {'公司': company, '公司编码': code, '地区表': sorted(set(regions)), '公司行状态': placeholder,
+            '投递站点': [{k: v[k] for k in ('站点', '登录链接', '账号核对页', '状态')} | {'站点编码': sc}
+                     for sc, v in M.sites(master).items() if v['公司编码'] == code],
             '校招主链接': [{k: v.get(k) for k in ('校招主链接', '适用届别', '投递窗口')} for v in rows_of('校招主链接')],
             '校招计划': {'数量': len([v for v in plans if v.get('计划')]),
                        '计划': [{k: v.get(k) for k in ('计划', '投递关系', '盘点状态', '核验日期')} for v in plans if v.get('计划')],
@@ -1593,31 +1795,40 @@ def main():
     p.add_argument('--company', required=True, action='append', help='公司名，可多次')
     for name in ('propose', 'confirm'):
         p = sub.add_parser(name)
-        p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link|title|placeholder,to}]')
+        p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, to}] 或公司行 [{sheet, code: 公司编码, to}]')
         if name == 'confirm':
             p.add_argument('--quote', required=True, help='用户确认原话')
             p.add_argument('--ref', default='', help='确认依据引用（对话/文件）')
     p = sub.add_parser('status')
-    p.add_argument('--sheet', required=True)
-    p.add_argument('--company', required=True)
-    p.add_argument('--link')
-    p.add_argument('--title')
+    p.add_argument('--code', required=True, help='岗位编码；公司行给公司编码并加 --sheet')
+    p.add_argument('--sheet')
     p = sub.add_parser('upsert')
-    p.add_argument('--input', required=True, help='UTF-8 JSON：[{key:{sheet,company,link|title},values:{列:值}}]')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{key:{code}|{sheet,company|company_code,role:"new"}|{sheet,company|company_code}, values:{列:值}}]')
     p = sub.add_parser('reset-rows')
-    p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link|title}] 要删除的岗位行')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码}] 要删除的岗位行')
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
     p.add_argument('--preview', action='store_true')
-    p.add_argument('--drop-company', action='append', default=[], help='岗位删光后连同公司行整家删除的公司（可多次）')
+    p.add_argument('--drop-company', action='append', default=[], help='岗位删光后连同公司行整家删除的公司（公司编码或公司名，可多次）')
     p.add_argument('--mark-research', action='store_true', help='公司仍有其它岗位时也把公司行改回“待搜索”，标明需重新搜索')
     p = sub.add_parser('link-exception')
-    p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link,title,定位说明}]，撤销时给 "撤销": true')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, 定位说明}]，撤销时给 "撤销": true')
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
     p.add_argument('--preview', action='store_true')
     p = sub.add_parser('relink')
-    p.add_argument('--input', required=True, help='UTF-8 JSON：[{sheet,company,link,title,new_link}]，link/title 为该行当前值')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, new_link}]')
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
     p.add_argument('--preview', action='store_true')
+    p = sub.add_parser('set-apply-link')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, 投递链接: url|null}]')
+    p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
+    p.add_argument('--preview', action='store_true')
+    p = sub.add_parser('set-site-links')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 站点编码, 登录链接?: url|null, 账号核对页?: url}]')
+    p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
+    p.add_argument('--preview', action='store_true')
+    p = sub.add_parser('set-order')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, 志愿顺序: 正整数|null}]')
+    p.add_argument('--quote', required=True, help='用户给定顺序的原话')
     p = sub.add_parser('set-quota-rules')
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{公司,范围,适用计划/批次,投递上限,是否分BU可平行投递,是否可以滚动投递,规则原文,来源/核验日期,原文出处文件}]；按公司整体覆盖。规则原文须为来源原文逐字摘抄（无官方说法写“公司未披露”），来源/核验日期格式“来源：<公司>-<岗位或页面> 核验日期：YYYY-MM-DD”')
     p = sub.add_parser('set-sheet-rows')
@@ -1640,10 +1851,15 @@ def main():
     def read(f):
         return json.loads(Path(f).read_text(encoding='utf-8'))
     code = 0
+    if a.cmd == 'check' and M.COUNTERS not in ctx.load_master():
+        # 编码迁移前：行身份、名额归属都按编码算，旧数据没有编码，这些检查不适用（不报假问题）
+        print(json.dumps({'migration_required': True,
+                          'note': '主表尚未做固定编码迁移（migrate_codes_step1.py）；迁移完成前编码、名额、状态核对不适用'}, ensure_ascii=False, indent=2))
+        return 0
     if a.cmd == 'check':
         m = ctx.load_master()
         probs = validate_labels(ctx, m)
-        fprobs = validate_fields(ctx, m) + validate_quota(m) + validate_link_exceptions(ctx, m)
+        fprobs = validate_codes(ctx, m) + validate_fields(ctx, m) + validate_quota(m) + validate_link_exceptions(ctx, m)
         changed, extra = diff_counts(ctx, m)
         ch = status_changes(ctx, m)
         miss = unconfirmed(ctx, ch)
@@ -1655,12 +1871,11 @@ def main():
                'label_problems': len(probs), 'label_problem_samples': probs[:20],
                'field_problems': len(fprobs), 'field_problem_samples': fprobs[:20],
                'cells_json_vs_excel_diff': changed, 'excel_only_sheets': extra,
-               'status_changes': len(ch), 'status_changes_without_user_confirmation': len(miss),
-               'link_changes_waiting_for_excel': len(identity_map(ctx))}
+               'status_changes': len(ch), 'status_changes_without_user_confirmation': len(miss)}
         code = 1 if (probs or fprobs or miss or leftover or over) else 0
     elif a.cmd == 'status':
         m = ctx.load_master()
-        key = normalize_key({'sheet': a.sheet, 'company': a.company, 'link': a.link, 'title': a.title})
+        key = resolve_key(ctx, m, {'code': a.code, 'sheet': a.sheet})
         s, idx, row = find_row(ctx, m, key)
         out = {'key': key, 'status': cell_value(row, idx[ctx.column]) or ''}
     elif a.cmd == 'propose':
@@ -1704,12 +1919,16 @@ def main():
         else:
             with exclusive(ctx):
                 out = link_exception(ctx, read(a.input), a.quote)
-    elif a.cmd == 'relink':
+    elif a.cmd in ('relink', 'set-apply-link', 'set-site-links'):
+        fn = {'relink': relink, 'set-apply-link': set_apply_link, 'set-site-links': set_site_links}[a.cmd]
         if a.preview:
-            out = relink(ctx, read(a.input), a.quote, preview=True)
+            out = fn(ctx, read(a.input), a.quote, preview=True)
         else:
             with exclusive(ctx):
-                out = relink(ctx, read(a.input), a.quote)
+                out = fn(ctx, read(a.input), a.quote)
+    elif a.cmd == 'set-order':
+        with exclusive(ctx):
+            out = set_order(ctx, read(a.input), a.quote)
     elif a.cmd == 'set-quota-rules':
         with exclusive(ctx):
             out = set_quota_rules(ctx, read(a.input))

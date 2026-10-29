@@ -1,4 +1,5 @@
-"""全链路测试：主表 → 正向评审 → 投递组件读取已确认批次 → 投递组件写回传 → 反向评审 → 用户确认写回主表。
+"""全链路测试：主表（固定编码）→ 每家公司宽表 → 正向评审 → 投递组件读取已确认的公司文件 →
+投递组件记链接观察 → apply-observations 用户确认后写主表、只重确认这一家 → 投递组件写回传 → 反向评审 → 用户确认写回主表。
 
 投递组件（job-application-assistant-v2）不在同一仓库；不存在或没有 node 时跳过。
 """
@@ -18,6 +19,8 @@ from openpyxl import Workbook
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import workbook_store  # noqa: E402
+import json_excel_sync as S  # noqa: E402
+import master_codes as M  # noqa: E402
 
 V2 = HERE.parents[1] / 'job-application-assistant-v2'
 STORE = HERE / 'company_store.py'
@@ -33,21 +36,24 @@ import path from 'node:path';
 const v2 = process.env.V2_DIR;
 const {readHandoffBatch} = await import(path.join(v2, 'shared/company-directory.mjs'));
 const {closeApplication} = await import(path.join(v2, 'shared/application-closeout.mjs'));
+const {recordObservation} = await import(path.join(v2, 'shared/application-outcome.mjs'));
 const sha = b => createHash('sha256').update(b).digest('hex');
 const {input} = await readHandoffBatch();
 const results = [];
+// 链接观察：投递端只记到 投递回传.json，不改交接区
+for (const o of JSON.parse(process.env.OBSERVE || '[]')) results.push(await recordObservation({...o, evidence: 'role_enter_application_verified'}));
 for (const [title, event, result] of JSON.parse(process.env.PLAN)) {
   const c = input.companies.find(x => x.roles.some(r => r.title === title));
   const r = c.roles.find(x => x.title === title);
   const shot = path.join(process.env.EVIDENCE_DIR, r.roleId + '.png');
   await writeFile(shot, 'png-' + r.roleId);
-  const ev = {schemaVersion: 1, event, batchId: input.batchId, companyId: c.companyId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
+  const ev = {schemaVersion: 1, event, batchId: input.batchId, companyId: r.siteId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
     observedAt: new Date(Date.now() - 1000).toISOString(), sourceUrl: r.url, result, reviewer: 'test',
     artifacts: [{file: shot, sha256: sha(await readFile(shot))}]};
   const evFile = path.join(process.env.EVIDENCE_DIR, r.roleId + '.json');
   await writeFile(evFile, JSON.stringify(ev));
   results.push(await closeApplication({outcome: {schemaVersion: 1, eventId: randomUUID(), event, batchId: input.batchId,
-    companyId: c.companyId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
+    companyId: r.siteId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
     evidence: {file: evFile, sha256: sha(await readFile(evFile))}}}));
 }
 console.log(JSON.stringify({input, results}));
@@ -78,10 +84,16 @@ class HandoffChainTests(unittest.TestCase):
                   {"value": "岗位失效/关闭", "definition": "x"}]
         cfg = {"schemaVersion": 1, "rowKind": "role", "labelGroups": ["产品管理/company-labels.json"], "column": "投递状态", "sheets": ["中国大陆"], "labels": labels,
                "confirmationLedger": "产品管理/确认.json", "masterData": "岗位交接/工作簿全量.json", "workbook": "book.xlsx",
-               "companyStore": {"dir": "岗位交接/公司", "batchFile": "岗位交接/投递批次.json", "forwardReview": "岗位交接/正向评审.html",
+               "companyStore": {"dir": "岗位交接/公司", "forwardReview": "岗位交接/正向评审.html",
                                 "thirdPartyHosts": []}}
         (r / '产品管理/labels.json').write_text(json.dumps(cfg, ensure_ascii=False), encoding='utf-8')
-        (r / '岗位交接/工作簿全量.json').write_text(json.dumps(workbook_store.snapshot(r / 'book.xlsx'), ensure_ascii=False), encoding='utf-8')
+        # 迁移后的主表：甲公司 C00001、乙公司 C00002；AI产品经理 J000001、数据产品经理 J000002，站点 S0001
+        snap = workbook_store.snapshot(r / 'book.xlsx')
+        M.assign_missing_codes(snap, ['中国大陆'])
+        S.refresh_digest(snap)
+        (r / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+        # 迁移脚本的首次写入：Excel 加上编码列（状态逐行一致才允许）
+        S.write(S.Ctx(r, r / '产品管理/labels.json'), code_migration=True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -94,9 +106,10 @@ class HandoffChainTests(unittest.TestCase):
             self.fail(p.stderr + p.stdout)
         return json.loads(p.stdout) if p.stdout.strip() else None
 
-    def v2(self, plan):
+    def v2(self, plan, observe=()):
         env = dict(os.environ, V2_DIR=str(V2), RECRUITING_HANDOFF_DIR=str(self.root / '岗位交接'),
-                   EVIDENCE_DIR=str(self.root / 'evidence'), PLAN=json.dumps(plan, ensure_ascii=False))
+                   EVIDENCE_DIR=str(self.root / 'evidence'), PLAN=json.dumps(plan, ensure_ascii=False),
+                   OBSERVE=json.dumps([dict(o, handoffDir=str(self.root / '岗位交接')) for o in observe], ensure_ascii=False))
         p = subprocess.run(['node', '--input-type=module', '-e', NODE], capture_output=True, text=True, encoding='utf-8', env=env, cwd=str(V2))
         if p.returncode:
             self.fail(p.stderr + p.stdout)
@@ -110,16 +123,11 @@ class HandoffChainTests(unittest.TestCase):
 
     def test_full_chain(self):
         self.py(STORE, 'refresh')
-        # 投递组件此前进入过申请页并写回的申请页链接：refresh 保留，正向批次带上，投递组件读取后直接从申请页进入
-        cf = self.root / '岗位交接/公司/中国大陆/甲公司/公司.json'
-        doc = json.loads(cf.read_text(encoding='utf-8'))
-        doc['roles'][0]['投递链接'] = 'https://jia.jobs.example.cn/campus/apply/123456'
-        cf.write_text(json.dumps(doc, ensure_ascii=False), encoding='utf-8')
-        self.py(STORE, 'refresh')
+        jia = json.loads((self.root / '岗位交接/公司/C00001.json').read_text(encoding='utf-8'))
+        self.assertEqual([(r['岗位编码'], r['站点编码'], r['官方岗位ID']) for r in jia['岗位']], [('J000001', 'S0001', '123456'), ('J000002', 'S0001', '778899')])
         self.assertEqual(self.py(STORE, 'forward')['roles'], 0)  # 同组两个岗位，用户未给志愿顺序不交接
         order = self.root / 'order.json'
-        order.write_text(json.dumps([{"sheet": "中国大陆", "company": "甲公司", "link": A_URL, "顺序": 1},
-                                     {"sheet": "中国大陆", "company": "甲公司", "link": B_URL, "顺序": 2}], ensure_ascii=False), encoding='utf-8')
+        order.write_text(json.dumps([{"code": "J000001", "志愿顺序": 1}, {"code": "J000002", "志愿顺序": 2}], ensure_ascii=False), encoding='utf-8')
         self.py(STORE, 'set-order', '--input', str(order), '--quote', 'AI产品第一志愿，数据产品第二')
         self.assertEqual(self.py(STORE, 'forward')['roles'], 2)
         # 正向评审未确认：投递组件拒绝读取
@@ -130,24 +138,42 @@ class HandoffChainTests(unittest.TestCase):
         self.assertIn('HANDOFF_NOT_CONFIRMED', p.stderr)
 
         self.py(STORE, 'forward-confirm', '--quote', '确认交接这两个岗位')
+        # 投递端第一次进入 AI 岗位的申请页（投递链接原为空）：只记观察
+        apply_url = 'https://jia.jobs.example.cn/campus/apply/123456'
+        before = (self.root / '岗位交接/公司/C00001.json').read_text(encoding='utf-8')
+        confirmed_sha = json.loads(before)['批次']['确认']['contentSha256']
+        out = self.v2([], observe=[{'kind': 'role', 'code': 'J000001', 'field': '投递链接', 'value': apply_url}])
+        self.assertEqual(out['results'], [{'status': 'observed', 'code': 'J000001', 'field': '投递链接'}])
+        self.assertEqual(out['input']['companies'][0]['roles'][0].get('applyUrl'), None)
+        self.assertEqual((self.root / '岗位交接/公司/C00001.json').read_text(encoding='utf-8'), before)
+        # 搜索端预览 → 用户原话确认 → 写主表、只重生成并重确认这一家（范围：链接变更）
+        preview = self.py(STORE, 'apply-observations')
+        self.assertEqual(preview['show_user_exactly'][0], f'中国大陆｜甲公司｜AI产品经理（J000001）：投递链接「空」→「{apply_url}」')
+        self.py(STORE, 'apply-observations', '--quote', '申请页地址对', '--expected-sha', preview['previousContentSha256'])
+        jia = json.loads((self.root / '岗位交接/公司/C00001.json').read_text(encoding='utf-8'))
+        self.assertEqual((jia['批次']['确认']['scope'], jia['批次']['确认']['previousContentSha256']), ('links_only', confirmed_sha))
+
         out = self.v2([['AI产品经理', 'submission_confirmed', 'official_receipt_confirmed'],
                        ['数据产品经理', 'role_closed', 'official_role_closed']])
-        self.assertEqual([r['title'] for r in out['input']['companies'][0]['roles']], ['AI产品经理', '数据产品经理'])
-        self.assertEqual(out['input']['companies'][0]['roles'][0].get('applyUrl'), 'https://jia.jobs.example.cn/campus/apply/123456')
+        roles = out['input']['companies'][0]['roles']
+        self.assertEqual([(r['roleId'], r['siteId'], r['title']) for r in roles], [('J000001', 'S0001', 'AI产品经理'), ('J000002', 'S0001', '数据产品经理')])
+        self.assertEqual(roles[0].get('applyUrl'), apply_url)
         self.assertEqual({r['status'] for r in out['results']}, {'closed'})
+        back = json.loads((self.root / '岗位交接/投递回传.json').read_text(encoding='utf-8'))
+        self.assertEqual(sorted(back['roles']), ['J000001', 'J000002'])
         self.assertEqual(self.status(), {'AI产品经理': '岗位待投递', '数据产品经理': '岗位待投递'})  # 投递组件不改主表
 
         rev = self.py(STORE, 'reverse')
         self.assertEqual(sorted(rev['show_user_exactly']), sorted([
-            '中国大陆｜甲公司｜AI产品经理：当前状态是「岗位待投递」，更新状态是「岗位已投递」',
-            '中国大陆｜甲公司｜数据产品经理：当前状态是「岗位待投递」，更新状态是「岗位失效/关闭」']))
+            '中国大陆｜甲公司｜AI产品经理（J000001）：当前状态是「岗位待投递」，更新状态是「岗位已投递」',
+            '中国大陆｜甲公司｜数据产品经理（J000002）：当前状态是「岗位待投递」，更新状态是「岗位失效/关闭」']))
         self.assertEqual(self.status()['AI产品经理'], '岗位待投递')  # 反向评审只出评审页
 
         res = self.py(STORE, 'reverse-confirm', '--quote', '确认回写')
-        self.assertEqual((res['state'], res['statusChanges']), ('已回写', 2))
+        self.assertEqual((res['companies'], res['statusChanges'], res['unresolved']), ({'C00001': '已回写'}, 2, []))
         self.assertEqual(self.status(), {'AI产品经理': '岗位已投递', '数据产品经理': '岗位失效/关闭'})
         self.assertFalse((self.root / '岗位交接/投递回传.json').exists())
-        # 主表与确认台账一致：写 Excel 的门禁不报未确认变更
+        # 主表与确认台账一致：写 Excel 的门禁不报未确认变更；投递链接写进主表 J 行
         chk = self.py(SYNC, 'check')
         self.assertEqual(chk['status_changes_without_user_confirmation'], 0)
         self.py(SYNC, 'write')

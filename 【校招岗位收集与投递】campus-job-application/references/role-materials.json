@@ -1,5 +1,5 @@
 {
-  "说明": "岗位材料定义（搜索端）。每一项把主表的一列转成投递批次 roles[].materials.items 的一条：key 必须与投递组件 catalog/role-materials.json 的 key 一致；新增材料在两边各加一项。separator 只取第一段；absent 匹配“明确没有”；value 不匹配时记为待核实。",
+  "说明": "岗位材料定义（搜索端）。每一项把主表的一列转成公司宽表「岗位」[].材料.items 的一条（证据为岗位编码、主表列名与该单元格内容的 Hash）：key 必须与投递组件 catalog/role-materials.json 的 key 一致；新增材料在两边各加一项。separator 只取第一段；absent 匹配“明确没有”；value 不匹配时记为待核实。",
   "schemaVersion": 1,
   "materials": [
     {

@@ -77,33 +77,34 @@ def timestamp(value):
         return float('-inf')
 
 
-def select_companies(rows, ledger, requirements):
-    """公司以地区+名称为身份；保留一家公司所有待投递岗位，不按岗位数截断。"""
+def select_companies(rows, ledger, requirements, names=None):
+    """公司以公司编码为身份（rows：{公司编码: [行记录]}）；保留一家公司所有待投递岗位，不按岗位数截断。
+    names：{公司编码: [公司名称, 已确认别名…]}，用于把需求里的公司名按完全一致对应到编码。"""
     import json_excel_sync as S
     req = normalize(requirements)
+    names = names or {}
     confirmations = {S.key_id(e['key']): timestamp(e.get('confirmed_at'))
                      for e in ledger.get('entries', [])
                      if e.get('key') and e.get('to') == '岗位待投递'}
     pending = {}
-    for key, records in rows.items():
-        if req.get('地区') and key[0] != req['地区']:
-            continue
-        roles = [r for r in records if r['kind'] == 'role' and r['values'].get('投递状态') == '岗位待投递']
+    for code, records in rows.items():
+        roles = [r for r in records if r['kind'] == 'role' and r['values'].get('投递状态') == '岗位待投递'
+                 and (not req.get('地区') or r['sheet'] == req['地区'])]
         if roles:
-            pending[key] = roles
+            pending[code] = roles
     if req.get('公司'):
         selected = []
         for name in req['公司']:
-            matches = [key for key in pending if key[1] == name]
+            matches = [code for code in pending if name == code or name in names.get(code, [])]
             if not matches:
                 raise ValueError('指定公司没有待投递岗位：' + name)
             if len(matches) != 1:
-                raise ValueError('同名公司跨地区，须指定地区：' + name)
+                raise ValueError('公司名对上多个公司编码，须给公司编码：' + name)
             selected.append(matches[0])
         return selected
-    def latest(key):
+    def latest(code):
         dates = []
-        for r in pending[key]:
+        for r in pending[code]:
             date = confirmations.get(S.key_id(r['key']), float('-inf'))
             dates.append(timestamp(r['values'].get('数据刷新时间')) if date == float('-inf') else date)
         return max(dates)

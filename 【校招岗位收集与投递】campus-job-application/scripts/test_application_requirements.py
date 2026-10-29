@@ -107,48 +107,55 @@ class RequirementsTests(unittest.TestCase):
 
 
 class SelectionTests(unittest.TestCase):
+    """公司以公司编码为身份；需求里的公司名按公司主数据名称/别名完全一致对应到编码。"""
     def rows(self, n=12):
-        rows, ledger = {}, {'entries': []}
+        rows, ledger, names = {}, {'entries': []}, {}
         for i in range(n):
-            key = {'sheet': '合成地区', 'company': '公司' + str(i), 'link': 'https://example.test/job/' + str(i)}
-            r = {'kind': 'role', 'key': key, 'values': {'投递状态': '岗位待投递', '数据刷新时间': '2001-01-01'}}
-            rows[('合成地区', key['company'])] = [r]
+            code = 'C%05d' % (i + 1)
+            key = {'sheet': '合成地区', 'code': 'J%06d' % (i + 1)}
+            r = {'kind': 'role', 'sheet': '合成地区', 'key': key, 'values': {'投递状态': '岗位待投递', '数据刷新时间': '2001-01-01'}}
+            rows[code] = [r]
+            names[code] = ['公司' + str(i)]
             ledger['entries'].append({'key': key, 'to': '岗位待投递', 'confirmed_at': '2002-01-%02dT00:00:00Z' % (i+1)})
-        return rows, ledger
+        return rows, ledger, names
 
     def test_empty_requirements_select_latest_ten_companies(self):
-        rows, ledger = self.rows()
-        selected = R.select_companies(rows, ledger, {})
-        self.assertEqual(selected, [('合成地区', '公司' + str(i)) for i in range(11, 1, -1)])
+        rows, ledger, names = self.rows()
+        selected = R.select_companies(rows, ledger, {}, names)
+        self.assertEqual(selected, ['C%05d' % (i + 1) for i in range(11, 1, -1)])
 
     def test_explicit_companies_override_default_limit_and_keep_requested_order(self):
-        rows, ledger = self.rows(20)
-        names = ['公司' + str(i) for i in range(20)]
-        selected = R.select_companies(rows, ledger, {'公司': names})
-        self.assertEqual([x[1] for x in selected], names)
-        self.assertEqual(len(selected), 20)
+        rows, ledger, names = self.rows(20)
+        wanted = ['公司' + str(i) for i in range(20)]
+        selected = R.select_companies(rows, ledger, {'公司': wanted}, names)
+        self.assertEqual([names[c][0] for c in selected], wanted)
 
     def test_company_selection_does_not_slice_its_roles(self):
-        rows, ledger = self.rows(1)
-        rows[('合成地区', '公司0')].append({'kind': 'role', 'key': {'sheet': '合成地区', 'company': '公司0', 'link': 'https://example.test/job/other'},
-                                      'values': {'投递状态': '岗位待投递'}})
-        selected = R.select_companies(rows, ledger, {'公司': ['公司0']})
+        rows, ledger, names = self.rows(1)
+        rows['C00001'].append({'kind': 'role', 'sheet': '合成地区', 'key': {'sheet': '合成地区', 'code': 'J000099'},
+                               'values': {'投递状态': '岗位待投递'}})
+        selected = R.select_companies(rows, ledger, {'公司': ['公司0']}, names)
         self.assertEqual(len(rows[selected[0]]), 2)
 
-    def test_missing_company_or_ambiguous_region_is_rejected(self):
-        rows, ledger = self.rows(1)
+    def test_missing_or_ambiguous_company_name_is_rejected(self):
+        rows, ledger, names = self.rows(2)
         with self.assertRaisesRegex(ValueError, '没有待投递'):
-            R.select_companies(rows, ledger, {'公司': ['不存在']})
-        rows[('另一地区', '公司0')] = rows[('合成地区', '公司0')]
-        with self.assertRaisesRegex(ValueError, '跨地区'):
-            R.select_companies(rows, ledger, {'公司': ['公司0']})
-        self.assertEqual(R.select_companies(rows, ledger, {'公司': ['公司0'], '地区': '合成地区'}), [('合成地区', '公司0')])
+            R.select_companies(rows, ledger, {'公司': ['不存在']}, names)
+        names['C00002'].append('公司0')  # 主数据异常：一个名字对上两个编码
+        with self.assertRaisesRegex(ValueError, '对上多个公司编码'):
+            R.select_companies(rows, ledger, {'公司': ['公司0']}, names)
+        self.assertEqual(R.select_companies(rows, ledger, {'公司': ['C00001']}, names), ['C00001'])
+
+    def test_region_filters_roles(self):
+        rows, ledger, names = self.rows(2)
+        rows['C00002'][0]['sheet'] = '另一地区'
+        self.assertEqual(R.select_companies(rows, ledger, {'地区': '另一地区'}, names), ['C00002'])
 
     def test_no_confirmation_uses_refresh_date_with_stable_ties(self):
-        rows, _ = self.rows(3)
-        rows[('合成地区', '公司1')][0]['values']['数据刷新时间'] = '2003-01-01'
-        selected = R.select_companies(rows, {'entries': []}, {})
-        self.assertEqual([x[1] for x in selected], ['公司1', '公司0', '公司2'])
+        rows, _, names = self.rows(3)
+        rows['C00002'][0]['values']['数据刷新时间'] = '2003-01-01'
+        selected = R.select_companies(rows, {'entries': []}, {}, names)
+        self.assertEqual(selected, ['C00002', 'C00001', 'C00003'])
 
 
 if __name__ == '__main__':
