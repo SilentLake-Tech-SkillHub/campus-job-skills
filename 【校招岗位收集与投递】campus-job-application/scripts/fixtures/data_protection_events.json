@@ -1,96 +1,879 @@
 [
- {"name":"git-add","allow":true,"tool":"Bash","args":{"command":"git add -- book.xlsx"}},
- {"name":"git-commit","allow":true,"tool":"Bash","args":{"command":"git commit -m 'record book.xlsx'"}},
- {"name":"git-restore-data","allow":true,"tool":"Bash","args":{"command":"git restore --worktree -- book.xlsx"}},
- {"name":"git-show-data","allow":true,"tool":"Bash","args":{"command":"git show HEAD:book.xlsx"}},
- {"name":"git-other-directory","allow":true,"tool":"Bash","args":{"command":"git -C '{{ROOT}}/other' add -- ../book.xlsx"}},
- {"name":"question","allow":true,"tool":"request_user_input_async","args":{"questions":[{"title":"提交 book.xlsx 或 data/main.json 吗？"}]}},
- {"name":"message","allow":true,"tool":"send_message_to_thread","args":{"prompt":"记录 book.xlsx 的链接"}},
- {"name":"read-book","allow":false,"tool":"Read","args":{"file_path":"{{ROOT}}/book.xlsx"}},
- {"name":"write-book","allow":false,"tool":"Write","args":{"file_path":"{{ROOT}}/book.xlsx","content":"x"}},
- {"name":"registered-no-extension","allow":false,"config":{"workbook":"ledger-data"},"tool":"Read","args":{"file_path":"{{ROOT}}/ledger-data"}},
- {"name":"other-project-book","allow":true,"tool":"Read","args":{"file_path":"{{ROOT}}/other/book.xlsx"}},
- {"name":"relative-outside-cwd","allow":true,"cwd":"{{ROOT}}/other","tool":"Read","args":{"path":"book.xlsx"}},
- {"name":"absolute-from-outside","allow":false,"cwd":"{{ROOT}}/other","tool":"Read","args":{"path":"{{ROOT}}/book.xlsx"}},
- {"name":"normalized-parent","allow":false,"tool":"Bash","args":{"command":"cd other && cat ../book.xlsx"}},
- {"name":"symlink-target","allow":false,"tool":"Read","args":{"path":"{{ROOT}}/book-alias"}},
- {"name":"read-json","allow":true,"tool":"Read","args":{"path":"{{ROOT}}/data/main.json"}},
- {"name":"write-json","allow":false,"tool":"Edit","args":{"path":"{{ROOT}}/data/main.json","new_string":"x"}},
- {"name":"registered-directory","allow":false,"tool":"Write","args":{"path":"{{ROOT}}/company","content":"x"}},
- {"name":"registered-directory-child","allow":false,"tool":"Write","args":{"path":"{{ROOT}}/company/C1.json","content":"x"}},
- {"name":"other-directory-same-name","allow":true,"tool":"Write","args":{"path":"{{ROOT}}/other/company/C1.json","content":"x"}},
- {"name":"echo-filename","allow":true,"tool":"Bash","args":{"command":"echo book.xlsx"}},
- {"name":"actual-read","allow":false,"tool":"Bash","args":{"command":"cat book.xlsx"}},
- {"name":"copy-source","allow":false,"tool":"Bash","args":{"command":"cp book.xlsx /tmp/target"}},
- {"name":"redirect","allow":false,"tool":"Bash","args":{"command":"echo x > book.xlsx"}},
- {"name":"script-name-bait","allow":false,"tool":"Bash","args":{"command":"echo json_excel_sync.py && cat book.xlsx"}},
- {"name":"inline-name-bait","allow":false,"tool":"Bash","args":{"command":"python3 -c \"print('json_excel_sync.py'); open('book.xlsx','rb').read()\""}},
- {"name":"actual-sync-entry","allow":true,"tool":"Bash","args":{"command":"python3 '{{ROOT}}/.agents/skills/campus-job-application/scripts/json_excel_sync.py' --workspace '{{ROOT}}' write"}},
- {"name":"sync-entry-redirect","allow":false,"tool":"Bash","args":{"command":"python3 '{{ROOT}}/.agents/skills/campus-job-application/scripts/json_excel_sync.py' check > book.xlsx"}},
- {"name":"git-followed-by-read","allow":false,"tool":"Bash","args":{"command":"git add book.xlsx && cat book.xlsx"}},
- {"name":"command-substitution","allow":false,"tool":"Bash","args":{"command":"echo $(cat book.xlsx)"}},
- {"name":"newline-command","allow":false,"tool":"Bash","args":{"command":"echo harmless\ncat book.xlsx"}},
- {"name":"nested-shell","allow":false,"tool":"Bash","args":{"command":"sh -c 'cat book.xlsx'"}},
- {"name":"parse-failure-in-scope","allow":false,"tool":"Bash","args":{"command":"cat 'book.xlsx"}},
- {"name":"parse-failure-outside","allow":true,"tool":"Bash","args":{"command":"cat 'other/book.xlsx"}},
- {"name":"unknown-tool-in-scope","allow":false,"tool":"unrecognized_file_action","args":{"file_path":"{{ROOT}}/data/main.json"}},
- {"name":"unknown-tool-outside","allow":true,"tool":"unrecognized_file_action","args":{"file_path":"{{ROOT}}/other/main.json"}},
- {"name":"unknown-command-in-scope","allow":false,"tool":"Bash","args":{"command":"mystery-tool data/main.json"}},
- {"name":"unknown-command-symlink","allow":false,"tool":"Bash","args":{"command":"mystery-tool book-alias"}},
- {"name":"unknown-command-directory-child","allow":false,"tool":"Bash","args":{"command":"mystery-tool company/C1.json"}},
- {"name":"parse-failure-directory-child","allow":false,"tool":"Bash","args":{"command":"cat 'company/C1.json"}},
- {"name":"json-writer-name-bait","allow":false,"tool":"Bash","args":{"command":"echo json_excel_sync.py; echo x > data/main.json"}},
- {"name":"soft-lock-code","allow":false,"tool":"Edit","args":{"file_path":"{{ROOT}}/.agents/skills/campus-job-application/SKILL.md","new_string":"x"}},
- {"name":"soft-lock-code-approved","allow":true,"approve":true,"tool":"Edit","args":{"file_path":"{{ROOT}}/.agents/skills/campus-job-application/SKILL.md","new_string":"x"}},
- {"name":"soft-lock-git-unchanged","allow":false,"tool":"Bash","args":{"command":"git -C '{{ROOT}}/.agents/skills/campus-job-application' checkout -- scripts"}},
- {"name":"soft-lock-git-approved","allow":true,"approve":true,"tool":"Bash","args":{"command":"git -C '{{ROOT}}/.agents/skills/campus-job-application' checkout -- scripts"}},
- {"name":"approval-does-not-unlock-data","allow":false,"approve":true,"tool":"Write","args":{"file_path":"{{ROOT}}/data/main.json","content":"x"}},
- {"name":"read-dsh-envelope","allow":false,"shape":"dsh","tool":"Read","args":{"file_path":"{{ROOT}}/book.xlsx"}},
- {"name":"question-agy-envelope","allow":true,"shape":"agy","tool":"request_user_input_async","args":{"questions":[{"title":"book.xlsx"}]}},
- {"name":"git-codex-cmd","allow":true,"tool":"exec_command","args":{"cmd":"git add book.xlsx"}},
- {"name":"serialized-arguments","allow":false,"shape":"serialized","tool":"Read","args":{"path":"{{ROOT}}/book.xlsx"}},
- {"name":"fake-sync-path","allow":false,"tool":"Bash","args":{"command":"python3 '{{ROOT}}/other/json_excel_sync.py' book.xlsx"}},
- {"name":"patch-body-is-not-target","allow":true,"tool":"apply_patch","args":{"command":"*** Begin Patch\n*** Update File: {{ROOT}}/tests/sample.py\n+example = 'book.xlsx company/B1.json'\n*** End Patch"}},
- {"name":"patch-real-workbook-target","allow":false,"tool":"apply_patch","args":{"command":"*** Begin Patch\n*** Update File: {{ROOT}}/book.xlsx\n+x\n*** End Patch"}},
- {"name":"json-arguments-parse-error","allow":false,"shape":"raw","tool":"Read","args":"{\"path\":\"{{ROOT}}/book.xlsx\""},
- {"name":"shell-workdir-outside","allow":true,"tool":"exec_command","args":{"cmd":"cat book.xlsx","workdir":"{{ROOT}}/other"}},
- {"name":"shell-workdir-in-scope","allow":false,"tool":"exec_command","args":{"cmd":"cat ../book.xlsx","workdir":"{{ROOT}}/other"}},
- {"name":"wrapped-git","allow":true,"tool":"functions.exec","args":{"input":"text(await tools.exec_command({cmd: \"git add book.xlsx\"}));"}},
- {"name":"wrapped-workdir","allow":true,"tool":"functions.exec","args":{"input":"text(await tools.exec_command({workdir: \"{{ROOT}}/other\", cmd: \"cat book.xlsx\"}));"}},
- {"name":"wrapped-in-scope","allow":false,"tool":"functions.exec","args":{"input":"text(await tools.exec_command({cmd: \"cat book.xlsx\"}));"}},
- {"name":"wrapped-plain-text","allow":true,"tool":"functions.exec","args":{"input":"text(\"open book.xlsx\");"}},
- {"name":"ordinary-copy-to-project-root","allow":true,"tool":"Bash","args":{"command":"cp '{{ROOT}}/other/note' '{{ROOT}}'"}},
- {"name":"nonrecursive-parent-metadata","allow":true,"tool":"Bash","args":{"command":"chmod 755 '{{ROOT}}'"}},
- {"name":"recursive-root-deletion","allow":false,"tool":"Bash","args":{"command":"rm -rf '{{ROOT}}'"}},
- {"name":"claude-question","allow":true,"tool":"AskUserQuestion","args":{"questions":[{"question":"现在处理 {{ROOT}}/book.xlsx 和 data/main.json 吗？","header":"处理方式","options":[{"label":"现在","description":"处理工作簿"},{"label":"稍后","description":"保持现状"}],"multiSelect":false}]}},
- {"name":"claude-message","allow":true,"tool":"SendUserMessage","args":{"message":"工作簿 {{ROOT}}/book.xlsx 仍由固定脚本写出。"}},
- {"name":"claude-namespaced-message","allow":true,"tool":"mcp__host__SendUserMessage","args":{"message":"核对 company/C1.json 与 book.xlsx"}},
- {"name":"claude-serialized-question","allow":true,"shape":"serialized","tool":"AskUserQuestion","args":{"questions":[{"question":"book.xlsx 要同步吗？"}]}},
- {"name":"claude-question-file-parameter","allow":false,"tool":"AskUserQuestion","args":{"file_path":"{{ROOT}}/book.xlsx","questions":[{"question":"核对附件"}]}},
- {"name":"find-delete-company","allow":false,"config":{"companyStore":{"dir":"岗位交接/公司"}},"tool":"Bash","args":{"command":"find 岗位交接/公司 -delete"}},
- {"name":"find-exec-remove-company","allow":false,"tool":"Bash","args":{"command":"find company -exec rm {} +"}},
- {"name":"find-exec-read-book","allow":false,"tool":"Bash","args":{"command":"find other -exec cat book.xlsx {} +"}},
- {"name":"find-exec-semicolon","allow":false,"tool":"Bash","args":{"command":"find other -exec cat book.xlsx {} \\;"}},
- {"name":"find-execdir-company","allow":false,"tool":"Bash","args":{"command":"find company -execdir rm {} +"}},
- {"name":"find-ok-company","allow":false,"tool":"Bash","args":{"command":"find company -ok rm {} \\;"}},
- {"name":"find-okdir-company","allow":false,"tool":"Bash","args":{"command":"find company -okdir rm {} \\;"}},
- {"name":"find-delete-parent","allow":false,"tool":"Bash","args":{"command":"find . -delete"}},
- {"name":"find-delete-implicit-root","allow":false,"tool":"Bash","args":{"command":"find -delete"}},
- {"name":"find-delete-symlink","allow":false,"tool":"Bash","args":{"command":"find -L book-alias -delete"}},
- {"name":"find-delete-after-cd","allow":false,"tool":"Bash","args":{"command":"cd other && find ../company -delete"}},
- {"name":"find-delete-outside","allow":true,"tool":"Bash","args":{"command":"find other -delete"}},
- {"name":"find-list-company","allow":true,"tool":"Bash","args":{"command":"find company -type f -name '*.json' -print"}},
- {"name":"find-list-book-name","allow":true,"tool":"Bash","args":{"command":"find . -name book.xlsx -print"}},
- {"name":"find-fprint-json","allow":false,"tool":"Bash","args":{"command":"find other -fprint data/main.json"}},
- {"name":"find-fprintf-book","allow":false,"tool":"Bash","args":{"command":"find other -fprintf book.xlsx '%p'"}},
- {"name":"find-files0-from-book","allow":false,"tool":"Bash","args":{"command":"find -files0-from book.xlsx -print"}},
- {"name":"jq-read-json","allow":true,"tool":"Bash","args":{"command":"jq '.sheets' data/main.json"}},
- {"name":"wc-read-json","allow":true,"tool":"Bash","args":{"command":"wc -c data/main.json"}},
- {"name":"diff-read-json","allow":true,"tool":"Bash","args":{"command":"diff -u data/main.json other/note"}},
- {"name":"jq-read-book","allow":false,"tool":"Bash","args":{"command":"jq '.' book.xlsx"}},
- {"name":"wc-read-book","allow":false,"tool":"Bash","args":{"command":"wc -c book.xlsx"}},
- {"name":"diff-read-book","allow":false,"tool":"Bash","args":{"command":"diff book.xlsx other/note"}},
- {"name":"wc-files0-from-book","allow":false,"tool":"Bash","args":{"command":"wc --files0-from=book.xlsx"}},
- {"name":"diff-from-file-book","allow":false,"tool":"Bash","args":{"command":"diff --from-file=book.xlsx other/note"}},
- {"name":"jq-filter-file-book","allow":false,"tool":"Bash","args":{"command":"jq --from-file=book.xlsx data/main.json"}}
+ {
+  "name": "git-add",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "git add -- book.xlsx"
+  }
+ },
+ {
+  "name": "git-commit",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "git commit -m 'record book.xlsx'"
+  }
+ },
+ {
+  "name": "git-restore-data",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "git restore --worktree -- book.xlsx"
+  }
+ },
+ {
+  "name": "git-show-data",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "git show HEAD:book.xlsx"
+  }
+ },
+ {
+  "name": "git-other-directory",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "git -C '{{ROOT}}/other' add -- ../book.xlsx"
+  }
+ },
+ {
+  "name": "question",
+  "allow": true,
+  "tool": "request_user_input_async",
+  "args": {
+   "questions": [
+    {
+     "title": "提交 book.xlsx 或 data/main.json 吗？"
+    }
+   ]
+  }
+ },
+ {
+  "name": "message",
+  "allow": true,
+  "tool": "send_message_to_thread",
+  "args": {
+   "prompt": "记录 book.xlsx 的链接"
+  }
+ },
+ {
+  "name": "read-book",
+  "allow": false,
+  "tool": "Read",
+  "args": {
+   "file_path": "{{ROOT}}/book.xlsx"
+  }
+ },
+ {
+  "name": "write-book",
+  "allow": false,
+  "tool": "Write",
+  "args": {
+   "file_path": "{{ROOT}}/book.xlsx",
+   "content": "x"
+  }
+ },
+ {
+  "name": "registered-no-extension",
+  "allow": false,
+  "config": {
+   "workbook": "ledger-data"
+  },
+  "tool": "Read",
+  "args": {
+   "file_path": "{{ROOT}}/ledger-data"
+  }
+ },
+ {
+  "name": "other-project-book",
+  "allow": true,
+  "tool": "Read",
+  "args": {
+   "file_path": "{{ROOT}}/other/book.xlsx"
+  }
+ },
+ {
+  "name": "relative-outside-cwd",
+  "allow": true,
+  "cwd": "{{ROOT}}/other",
+  "tool": "Read",
+  "args": {
+   "path": "book.xlsx"
+  }
+ },
+ {
+  "name": "absolute-from-outside",
+  "allow": false,
+  "cwd": "{{ROOT}}/other",
+  "tool": "Read",
+  "args": {
+   "path": "{{ROOT}}/book.xlsx"
+  }
+ },
+ {
+  "name": "normalized-parent",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cd other && cat ../book.xlsx"
+  }
+ },
+ {
+  "name": "symlink-target",
+  "allow": false,
+  "tool": "Read",
+  "args": {
+   "path": "{{ROOT}}/book-alias"
+  }
+ },
+ {
+  "name": "read-json",
+  "allow": true,
+  "tool": "Read",
+  "args": {
+   "path": "{{ROOT}}/data/main.json"
+  }
+ },
+ {
+  "name": "write-json",
+  "allow": false,
+  "tool": "Edit",
+  "args": {
+   "path": "{{ROOT}}/data/main.json",
+   "new_string": "x"
+  }
+ },
+ {
+  "name": "registered-directory",
+  "allow": false,
+  "tool": "Write",
+  "args": {
+   "path": "{{ROOT}}/company",
+   "content": "x"
+  }
+ },
+ {
+  "name": "registered-directory-child",
+  "allow": false,
+  "tool": "Write",
+  "args": {
+   "path": "{{ROOT}}/company/C1.json",
+   "content": "x"
+  }
+ },
+ {
+  "name": "other-directory-same-name",
+  "allow": true,
+  "tool": "Write",
+  "args": {
+   "path": "{{ROOT}}/other/company/C1.json",
+   "content": "x"
+  }
+ },
+ {
+  "name": "echo-filename",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "echo book.xlsx"
+  }
+ },
+ {
+  "name": "actual-read",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cat book.xlsx"
+  }
+ },
+ {
+  "name": "copy-source",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cp book.xlsx /tmp/target"
+  }
+ },
+ {
+  "name": "redirect",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo x > book.xlsx"
+  }
+ },
+ {
+  "name": "script-name-bait",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo json_excel_sync.py && cat book.xlsx"
+  }
+ },
+ {
+  "name": "inline-name-bait",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 -c \"print('json_excel_sync.py'); open('book.xlsx','rb').read()\""
+  }
+ },
+ {
+  "name": "actual-sync-entry",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 '{{ROOT}}/.agents/skills/campus-job-application/scripts/json_excel_sync.py' --workspace '{{ROOT}}' write"
+  }
+ },
+ {
+  "name": "sync-entry-redirect",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 '{{ROOT}}/.agents/skills/campus-job-application/scripts/json_excel_sync.py' check > book.xlsx"
+  }
+ },
+ {
+  "name": "git-followed-by-read",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "git add book.xlsx && cat book.xlsx"
+  }
+ },
+ {
+  "name": "command-substitution",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo $(cat book.xlsx)"
+  }
+ },
+ {
+  "name": "newline-command",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo harmless\ncat book.xlsx"
+  }
+ },
+ {
+  "name": "nested-shell",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "sh -c 'cat book.xlsx'"
+  }
+ },
+ {
+  "name": "parse-failure-in-scope",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cat 'book.xlsx"
+  }
+ },
+ {
+  "name": "parse-failure-outside",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "cat 'other/book.xlsx"
+  }
+ },
+ {
+  "name": "unknown-tool-in-scope",
+  "allow": false,
+  "tool": "unrecognized_file_action",
+  "args": {
+   "file_path": "{{ROOT}}/data/main.json"
+  }
+ },
+ {
+  "name": "unknown-tool-outside",
+  "allow": true,
+  "tool": "unrecognized_file_action",
+  "args": {
+   "file_path": "{{ROOT}}/other/main.json"
+  }
+ },
+ {
+  "name": "unknown-command-in-scope",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "mystery-tool data/main.json"
+  }
+ },
+ {
+  "name": "unknown-command-symlink",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "mystery-tool book-alias"
+  }
+ },
+ {
+  "name": "unknown-command-directory-child",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "mystery-tool company/C1.json"
+  }
+ },
+ {
+  "name": "parse-failure-directory-child",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cat 'company/C1.json"
+  }
+ },
+ {
+  "name": "json-writer-name-bait",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo json_excel_sync.py; echo x > data/main.json"
+  }
+ },
+ {
+  "name": "soft-lock-code",
+  "allow": false,
+  "tool": "Edit",
+  "args": {
+   "file_path": "{{ROOT}}/.agents/skills/campus-job-application/SKILL.md",
+   "new_string": "x"
+  }
+ },
+ {
+  "name": "soft-lock-code-approved",
+  "allow": true,
+  "approve": true,
+  "tool": "Edit",
+  "args": {
+   "file_path": "{{ROOT}}/.agents/skills/campus-job-application/SKILL.md",
+   "new_string": "x"
+  }
+ },
+ {
+  "name": "soft-lock-git-unchanged",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "git -C '{{ROOT}}/.agents/skills/campus-job-application' checkout -- scripts"
+  }
+ },
+ {
+  "name": "soft-lock-git-approved",
+  "allow": true,
+  "approve": true,
+  "tool": "Bash",
+  "args": {
+   "command": "git -C '{{ROOT}}/.agents/skills/campus-job-application' checkout -- scripts"
+  }
+ },
+ {
+  "name": "approval-does-not-unlock-data",
+  "allow": false,
+  "approve": true,
+  "tool": "Write",
+  "args": {
+   "file_path": "{{ROOT}}/data/main.json",
+   "content": "x"
+  }
+ },
+ {
+  "name": "read-dsh-envelope",
+  "allow": false,
+  "shape": "dsh",
+  "tool": "Read",
+  "args": {
+   "file_path": "{{ROOT}}/book.xlsx"
+  }
+ },
+ {
+  "name": "question-agy-envelope",
+  "allow": true,
+  "shape": "agy",
+  "tool": "request_user_input_async",
+  "args": {
+   "questions": [
+    {
+     "title": "book.xlsx"
+    }
+   ]
+  }
+ },
+ {
+  "name": "git-codex-cmd",
+  "allow": true,
+  "tool": "exec_command",
+  "args": {
+   "cmd": "git add book.xlsx"
+  }
+ },
+ {
+  "name": "serialized-arguments",
+  "allow": false,
+  "shape": "serialized",
+  "tool": "Read",
+  "args": {
+   "path": "{{ROOT}}/book.xlsx"
+  }
+ },
+ {
+  "name": "fake-sync-path",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 '{{ROOT}}/other/json_excel_sync.py' book.xlsx"
+  }
+ },
+ {
+  "name": "patch-body-is-not-target",
+  "allow": true,
+  "tool": "apply_patch",
+  "args": {
+   "command": "*** Begin Patch\n*** Update File: {{ROOT}}/tests/sample.py\n+example = 'book.xlsx company/B1.json'\n*** End Patch"
+  }
+ },
+ {
+  "name": "patch-real-workbook-target",
+  "allow": false,
+  "tool": "apply_patch",
+  "args": {
+   "command": "*** Begin Patch\n*** Update File: {{ROOT}}/book.xlsx\n+x\n*** End Patch"
+  }
+ },
+ {
+  "name": "json-arguments-parse-error",
+  "allow": false,
+  "shape": "raw",
+  "tool": "Read",
+  "args": "{\"path\":\"{{ROOT}}/book.xlsx\""
+ },
+ {
+  "name": "shell-workdir-outside",
+  "allow": true,
+  "tool": "exec_command",
+  "args": {
+   "cmd": "cat book.xlsx",
+   "workdir": "{{ROOT}}/other"
+  }
+ },
+ {
+  "name": "shell-workdir-in-scope",
+  "allow": false,
+  "tool": "exec_command",
+  "args": {
+   "cmd": "cat ../book.xlsx",
+   "workdir": "{{ROOT}}/other"
+  }
+ },
+ {
+  "name": "wrapped-git",
+  "allow": true,
+  "tool": "functions.exec",
+  "args": {
+   "input": "text(await tools.exec_command({cmd: \"git add book.xlsx\"}));"
+  }
+ },
+ {
+  "name": "wrapped-workdir",
+  "allow": true,
+  "tool": "functions.exec",
+  "args": {
+   "input": "text(await tools.exec_command({workdir: \"{{ROOT}}/other\", cmd: \"cat book.xlsx\"}));"
+  }
+ },
+ {
+  "name": "wrapped-in-scope",
+  "allow": false,
+  "tool": "functions.exec",
+  "args": {
+   "input": "text(await tools.exec_command({cmd: \"cat book.xlsx\"}));"
+  }
+ },
+ {
+  "name": "wrapped-plain-text",
+  "allow": true,
+  "tool": "functions.exec",
+  "args": {
+   "input": "text(\"open book.xlsx\");"
+  }
+ },
+ {
+  "name": "ordinary-copy-to-project-root",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "cp '{{ROOT}}/other/note' '{{ROOT}}'"
+  }
+ },
+ {
+  "name": "nonrecursive-parent-metadata",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "chmod 755 '{{ROOT}}'"
+  }
+ },
+ {
+  "name": "recursive-root-deletion",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "rm -rf '{{ROOT}}'"
+  }
+ },
+ {
+  "name": "claude-question",
+  "allow": true,
+  "tool": "AskUserQuestion",
+  "args": {
+   "questions": [
+    {
+     "question": "现在处理 {{ROOT}}/book.xlsx 和 data/main.json 吗？",
+     "header": "处理方式",
+     "options": [
+      {
+       "label": "现在",
+       "description": "处理工作簿"
+      },
+      {
+       "label": "稍后",
+       "description": "保持现状"
+      }
+     ],
+     "multiSelect": false
+    }
+   ]
+  }
+ },
+ {
+  "name": "claude-message",
+  "allow": true,
+  "tool": "SendUserMessage",
+  "args": {
+   "message": "工作簿 {{ROOT}}/book.xlsx 仍由固定脚本写出。"
+  }
+ },
+ {
+  "name": "claude-namespaced-message",
+  "allow": true,
+  "tool": "mcp__host__SendUserMessage",
+  "args": {
+   "message": "核对 company/C1.json 与 book.xlsx"
+  }
+ },
+ {
+  "name": "claude-serialized-question",
+  "allow": true,
+  "shape": "serialized",
+  "tool": "AskUserQuestion",
+  "args": {
+   "questions": [
+    {
+     "question": "book.xlsx 要同步吗？"
+    }
+   ]
+  }
+ },
+ {
+  "name": "claude-question-file-parameter",
+  "allow": false,
+  "tool": "AskUserQuestion",
+  "args": {
+   "file_path": "{{ROOT}}/book.xlsx",
+   "questions": [
+    {
+     "question": "核对附件"
+    }
+   ]
+  }
+ },
+ {
+  "name": "find-delete-company",
+  "allow": false,
+  "config": {
+   "companyStore": {
+    "dir": "岗位交接/公司"
+   }
+  },
+  "tool": "Bash",
+  "args": {
+   "command": "find 岗位交接/公司 -delete"
+  }
+ },
+ {
+  "name": "find-exec-remove-company",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find company -exec rm {} +"
+  }
+ },
+ {
+  "name": "find-exec-read-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find other -exec cat book.xlsx {} +"
+  }
+ },
+ {
+  "name": "find-exec-semicolon",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find other -exec cat book.xlsx {} \\;"
+  }
+ },
+ {
+  "name": "find-execdir-company",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find company -execdir rm {} +"
+  }
+ },
+ {
+  "name": "find-ok-company",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find company -ok rm {} \\;"
+  }
+ },
+ {
+  "name": "find-okdir-company",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find company -okdir rm {} \\;"
+  }
+ },
+ {
+  "name": "find-delete-parent",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find . -delete"
+  }
+ },
+ {
+  "name": "find-delete-implicit-root",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find -delete"
+  }
+ },
+ {
+  "name": "find-delete-symlink",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find -L book-alias -delete"
+  }
+ },
+ {
+  "name": "find-delete-after-cd",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cd other && find ../company -delete"
+  }
+ },
+ {
+  "name": "find-delete-outside",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "find other -delete"
+  }
+ },
+ {
+  "name": "find-list-company",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "find company -type f -name '*.json' -print"
+  }
+ },
+ {
+  "name": "find-list-book-name",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "find . -name book.xlsx -print"
+  }
+ },
+ {
+  "name": "find-fprint-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find other -fprint data/main.json"
+  }
+ },
+ {
+  "name": "find-fprintf-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find other -fprintf book.xlsx '%p'"
+  }
+ },
+ {
+  "name": "find-files0-from-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "find -files0-from book.xlsx -print"
+  }
+ },
+ {
+  "name": "jq-read-json",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "jq '.sheets' data/main.json"
+  }
+ },
+ {
+  "name": "wc-read-json",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "wc -c data/main.json"
+  }
+ },
+ {
+  "name": "diff-read-json",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "diff -u data/main.json other/note"
+  }
+ },
+ {
+  "name": "jq-read-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "jq '.' book.xlsx"
+  }
+ },
+ {
+  "name": "wc-read-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "wc -c book.xlsx"
+  }
+ },
+ {
+  "name": "diff-read-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "diff book.xlsx other/note"
+  }
+ },
+ {
+  "name": "wc-files0-from-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "wc --files0-from=book.xlsx"
+  }
+ },
+ {
+  "name": "diff-from-file-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "diff --from-file=book.xlsx other/note"
+  }
+ },
+ {
+  "name": "jq-filter-file-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "jq --from-file=book.xlsx data/main.json"
+  }
+ },
+ {
+  "name": "dsh-todo-text-workbook",
+  "allow": true,
+  "tool": "todo_write",
+  "shape": "dsh",
+  "args": {
+   "command": "",
+   "todos": [
+    {
+     "content": "检查 {{ROOT}}/book.xlsx 的同步状态",
+     "status": "pending"
+    }
+   ]
+  }
+ },
+ {
+  "name": "dsh-todo-real-file-parameter",
+  "allow": false,
+  "tool": "todo_write",
+  "shape": "dsh",
+  "args": {
+   "command": "",
+   "file_path": "{{ROOT}}/book.xlsx",
+   "todos": []
+  }
+ },
+ {
+  "name": "soft-lock-dsh-empty-command-edit",
+  "allow": false,
+  "tool": "edit",
+  "shape": "dsh",
+  "args": {
+   "command": "",
+   "file_path": "{{ROOT}}/.agents/skills/job-application-assistant-v2/SKILL.md",
+   "old_string": "a",
+   "new_string": "b"
+  }
+ },
+ {
+  "name": "soft-lock-dsh-empty-command-edit-approved",
+  "allow": true,
+  "approve": true,
+  "tool": "edit",
+  "shape": "dsh",
+  "args": {
+   "command": "",
+   "file_path": "{{ROOT}}/.agents/skills/job-application-assistant-v2/SKILL.md",
+   "old_string": "a",
+   "new_string": "b"
+  }
+ },
+ {
+  "name": "soft-lock-dsh-todo-text",
+  "allow": true,
+  "tool": "todo_write",
+  "shape": "dsh",
+  "args": {
+   "command": "",
+   "todos": [
+    {
+     "content": "Read {{ROOT}}/.agents/skills/job-application-assistant-v2/SKILL.md",
+     "status": "pending"
+    }
+   ]
+  }
+ }
 ]

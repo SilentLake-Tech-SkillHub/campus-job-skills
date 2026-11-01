@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_payload import (call_parts, _session, PROMPT_KEYS, _prompt, QUESTION_REPLY_TAG, QUESTION_REPLY,
                           QUESTION_CALL_ID, _approval_prompts)
-from hook_file_policy import file_effects, path_at, touches, mentioned
+from hook_file_policy import file_effects, path_at, touches, mentioned, TEXT_TOOLS, PATH_KEYS
 
 SCRIPT = Path(__file__).with_name('json_excel_sync.py')
 EDIT_TOOL = re.compile(r'(write|edit|patch|replace|create|insert|notebook)', re.I)
@@ -491,7 +491,10 @@ def _shell_targets(root, cwd, cmd):
 def component_violation(root, payload):
     tool, ti = call_parts(payload)
     cwd = payload.get('cwd') or str(root)
-    if isinstance(ti, dict) and isinstance(ti.get('command'), str) or SHELL_TOOL.search(tool) and not EDIT_TOOL.search(tool):
+    name = tool.rsplit('__', 1)[-1].rsplit('.', 1)[-1].lower()
+    if name in TEXT_TOOLS and not (isinstance(ti, dict) and any(k in ti for k in PATH_KEYS + ('attachments', 'attachment_path'))):
+        return None
+    if isinstance(ti, dict) and isinstance(ti.get('command'), str) and ti['command'].strip() or SHELL_TOOL.search(tool) and not EDIT_TOOL.search(tool):
         raw = ti.get('command') if isinstance(ti, dict) and isinstance(ti.get('command'), str) else json.dumps(ti, ensure_ascii=False)
         targets = _shell_targets(root, cwd, raw)
     elif EDIT_TOOL.search(tool):

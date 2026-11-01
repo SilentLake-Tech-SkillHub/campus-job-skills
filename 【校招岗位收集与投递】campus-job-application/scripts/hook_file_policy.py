@@ -21,7 +21,7 @@ DISPLAY = {'echo', 'printf', 'true', 'false', 'pwd', 'date', 'which', 'command',
 READ_COMMANDS = {'cat', 'head', 'tail', 'less', 'more', 'xxd', 'hexdump', 'strings', 'file', 'jq', 'wc', 'diff'}
 LITERAL = r'''("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')'''
 TEXT_TOOLS = {'request_user_input', 'request_user_input_async', 'send_message', 'send_message_to_thread',
-              'notify', 'text', 'askuserquestion', 'sendusermessage'}
+              'notify', 'text', 'askuserquestion', 'sendusermessage', 'todo_write', 'todo_read'}
 
 
 @dataclass(frozen=True)
