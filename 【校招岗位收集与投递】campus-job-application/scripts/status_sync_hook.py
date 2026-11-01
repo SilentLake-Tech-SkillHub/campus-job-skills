@@ -338,6 +338,64 @@ def _load_approvals(root):
         return {}
 
 
+# An independent question after a real approval is not a condition on that
+# approval. Keep commas/newlines in the same condition scope so splitting
+# "如果...，批准..." cannot turn a conditional instruction into permission.
+APPROVAL_CONDITION = re.compile(r'如果|若(?!干)|假如|倘若|仅当|只有|除非|前提|条件|满足.{0,20}后|待.{0,20}(?:后|再)|等.{0,20}(?:后|再)')
+APPROVAL_POST_CONDITION = re.compile(r'^\s*(?:(?:但|不过|且|同时|仅|只)\s*)?(?:前提|条件|必须|须|仅当|只有|除非|如果|若|待|等.{0,20}(?:后|再))')
+
+
+def component_approval_quotes(prompt):
+    """Return only unconditional, non-question authorization clauses.
+
+    This consumes the existing host adapter's submitted user/answer text; it
+    does not parse UI questions, change session identity or register approval.
+    """
+    quotes = []
+    # Newlines do not break a leading condition. Strong sentence punctuation
+    # still lets a later unrelated question coexist with an earlier approval.
+    sentences = re.split(r'(?<=[。；;！？!?])', re.sub(r'\r?\n+', '，', prompt))
+    carry_condition = False
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        clauses = [part.strip() for part in re.split(r'[,，]', sentence) if part.strip()]
+        # A direct component denial must not be silently overridden by a
+        # positive clause in the same submitted instruction.
+        if any(COMPONENT_WORD.search(c) and NEGATED.search(c) for c in clauses):
+            quotes = []
+            carry_condition = False
+            continue
+        matched = False
+        for index, clause in enumerate(clauses):
+            if not (COMPONENT_WORD.search(clause) and APPROVE_MODIFY.search(clause)):
+                continue
+            matched = True
+            prefix = '，'.join(clauses[:index])
+            suffix = clauses[index + 1:]
+            question = clause.rstrip().endswith(('?', '？')) or re.search(r'(?:吗|么)\s*[。；;！!]?$', clause)
+            scoped_condition = (carry_condition or APPROVAL_CONDITION.search(clause)
+                                or APPROVAL_CONDITION.search(prefix)
+                                or any(APPROVAL_POST_CONDITION.search(c) for c in suffix))
+            if scoped_condition:
+                # A later conditional permission narrows an earlier broad
+                # approval; do not silently keep the earlier unrestricted one.
+                quotes = []
+                continue
+            if (question or NEGATED.search(clause) or CONDITIONAL.search(clause)
+                    or CONDITIONAL.search(prefix)):
+                continue
+            quotes.append(clause.rstrip('。；;！!').strip())
+        # Conservatively retain a standalone condition fragment across a full
+        # stop. A completed conditional instruction/question does not poison an
+        # unrelated later explicit approval.
+        carry_condition = bool(not matched and len(clauses) == 1
+                               and APPROVAL_CONDITION.match(sentence)
+                               and not sentence.endswith(('?', '？')))
+    return quotes
+
+
 def record_approval(root, payload):
     """只看用户本人发出的消息：明确批准修改组件 → 记录本会话批准；收回 → 删除。返回给 AI 的提示。"""
     prompts = _approval_prompts(payload)
@@ -348,8 +406,7 @@ def record_approval(root, payload):
     now = __import__('time').time()
     data = {k: v for k, v in data.items() if v.get('expiresAt', 0) > now}
     note = ''
-    approval_quotes = [p.strip() for p in prompts if COMPONENT_WORD.search(p) and APPROVE_MODIFY.search(p)
-                       and not NEGATED.search(p) and not CONDITIONAL.search(p)]
+    approval_quotes = [quote for prompt in prompts for quote in component_approval_quotes(prompt)]
     if any(REVOKE.search(p) for p in prompts):
         data.pop(sid, None)
         note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'

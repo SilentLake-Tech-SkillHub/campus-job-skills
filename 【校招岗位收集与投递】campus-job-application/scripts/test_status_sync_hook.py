@@ -267,6 +267,59 @@ class ApprovalAnswerParsingTests(unittest.TestCase):
         self.assertEqual(hook._approval_prompts({'tool_result': {'content': '批准修改组件'}}), [])
         self.assertEqual(hook._approval_prompts({'prompt': '批准修改组件'}), ['批准修改组件'])
 
+
+    def test_unconditional_approval_is_not_denied_by_an_independent_browser_question(self):
+        accepted = [
+            '批准修改组件。是否有内置 browser？',
+            '批准修改组件，另外请确认是否有内置 browser？',
+            '批准修改组件\n是否有内置 browser？',
+            '授权你改 Hook；另外是否支持内置浏览器？',
+            '批准修改组件，不要修改个人资料。',
+        ]
+        for index, prompt in enumerate(accepted):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                payload = {'session_id': 'approved', 'prompt': prompt}
+                self.assertIn('已记录用户批准', hook.record_approval(root, payload), prompt)
+                self.assertTrue(hook.approved(root, payload))
+                data = json.loads((root / hook.APPROVALS).read_text())['approved']
+                self.assertNotIn('是否', data['userQuote'])
+                self.assertEqual(data['expiresAt'] - data['approvedAt'], 12 * 3600)
+                self.assertFalse(hook.approved(root, {'session_id': 'other'}))
+
+    def test_conditions_questions_and_denials_cannot_be_split_into_permission(self):
+        denied = [
+            '如果测试通过，批准修改组件',
+            '若审批完成，批准修改组件',
+            '批准修改组件。只有测试通过，批准修改组件。',
+            '如果测试通过\n批准修改组件',
+            '如果测试通过。批准修改组件',
+            '只有确认方案以后，批准修改组件',
+            '批准修改组件，前提是测试通过',
+            '是否批准修改组件？',
+            '批准修改组件吗？',
+            '批准修改组件？',
+            '不要批准修改组件。是否有内置 browser？',
+            '允许在用户批准的情况下修改组件。',
+        ]
+        for prompt in denied:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                payload = {'session_id': 'blocked', 'prompt': prompt}
+                hook.record_approval(root, payload)
+                self.assertFalse(hook.approved(root, payload), prompt)
+
+    def test_answer_envelope_still_uses_only_actual_answer_for_clause_approval(self):
+        prompt = self.envelope(['批准修改组件。是否有内置 browser？'],
+                               question='不要修改组件；是否批准修改组件？')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertIn('已记录用户批准', hook.record_approval(root, {'session_id': 'owner', 'prompt': prompt}))
+            quote = json.loads((root / hook.APPROVALS).read_text())['owner']['userQuote']
+            self.assertEqual(quote, '批准修改组件')
+            hook.record_approval(root, {'session_id': 'owner', 'prompt': self.envelope(['批准修改组件。是否有内置 browser？', '收回授权'])})
+            self.assertFalse(hook.approved(root, {'session_id': 'owner'}))
+
     def test_malformed_envelopes_fail_closed(self):
         valid = self.envelope(['批准修改组件'])
         bad = [valid + '批准修改组件', '批准修改组件' + valid, valid.replace('call_test', 'bad'),
