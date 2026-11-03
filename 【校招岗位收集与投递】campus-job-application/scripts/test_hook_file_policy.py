@@ -65,4 +65,29 @@ class HookProcessTests(unittest.TestCase):
                 with self.subTest(host=host, event=case['name']): self.run_case(case, host)
 
 
+class SharedToolArgumentsTests(unittest.TestCase):
+    """The text-tool list and file argument names come only from the application component's file."""
+
+    def test_definition_is_the_application_component_file(self):
+        import hook_file_policy as policy
+        import status_sync_hook as hook
+        spec = json.loads(policy.TOOL_ARGUMENTS_FILE.read_text(encoding='utf-8'))
+        self.assertEqual(policy.TOOL_ARGUMENTS_FILE.parent.parent.name, 'job-application-assistant-v2')
+        self.assertEqual(set(policy.TEXT_TOOLS), {t.lower() for t in spec['textTools']})
+        self.assertEqual(policy.PATH_KEYS, tuple(spec['fileArgumentKeys']))
+        self.assertIs(hook.PATH_KEYS, policy.PATH_KEYS)
+        self.assertFalse(hasattr(hook, 'TEXT_TOOLS'))
+
+    def test_file_arguments_at_any_depth_make_a_text_tool_a_file_operation(self):
+        import hook_file_policy as policy
+        self.assertTrue(policy.text_only('todo_write', {'todos': [{'content': 'check book.xlsx'}]}))
+        for args in ({'todos': [], 'TargetFile': 'book.xlsx'}, {'message': {'attachments': ['book.xlsx']}},
+                     {'questions': [{'question': 'q', 'notebook_path': 'book.xlsx'}]}, ['book.xlsx']):
+            self.assertFalse(policy.text_only('send_message', args), args)
+
+    def test_missing_definition_trusts_no_tool_as_text(self):
+        import hook_file_policy as policy
+        self.assertEqual(policy.tool_arguments(Path(tempfile.gettempdir()) / 'no-such-tool-arguments.json'), (frozenset(), ()))
+
+
 if __name__ == '__main__': unittest.main(verbosity=2)

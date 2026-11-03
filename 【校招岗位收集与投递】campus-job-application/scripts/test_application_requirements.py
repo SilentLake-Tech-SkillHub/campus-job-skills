@@ -1,3 +1,6 @@
+from test_browser_capabilities import fixture_environment
+from unittest.mock import patch
+import os
 import json
 from pathlib import Path
 import tempfile
@@ -27,6 +30,7 @@ class RequirementsTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        environment=patch.dict(os.environ,fixture_environment(self.root));environment.start();self.addCleanup(environment.stop)
         self.store = R.Requirements(self.root, 'session-a', 'turn-1')
 
     def test_same_turn_default_does_not_ask_again_next_turn_resets(self):
@@ -104,6 +108,14 @@ class RequirementsTests(unittest.TestCase):
         self.store.temp.write_text('{broken', encoding='utf-8')
         with self.assertRaisesRegex(ValueError, '停止'):
             self.store.begin()
+
+
+    def test_maintenance_initialization_never_clears_a_pending_request(self):
+        self.assertTrue(self.store.set({}, 'cleanup request', maintenance_clear=True)['maintenanceCleanup'])
+        self.assertFalse(self.store.state.exists())
+        self.store.set({'公司':['甲公司']}, 'new request')
+        with self.assertRaisesRegex(ValueError, '不能清除'):
+            self.store.set({}, 'cleanup request', maintenance_clear=True)
 
 
 class SelectionTests(unittest.TestCase):

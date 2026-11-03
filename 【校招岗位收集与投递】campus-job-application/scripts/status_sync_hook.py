@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_payload import (call_parts, _session, PROMPT_KEYS, _prompt, QUESTION_REPLY_TAG, QUESTION_REPLY,
                           QUESTION_CALL_ID, _approval_prompts)
-from hook_file_policy import file_effects, path_at, touches, mentioned, TEXT_TOOLS, PATH_KEYS
+from hook_file_policy import file_effects, path_at, touches, mentioned, text_only, PATH_KEYS
 
 SCRIPT = Path(__file__).with_name('json_excel_sync.py')
 EDIT_TOOL = re.compile(r'(write|edit|patch|replace|create|insert|notebook)', re.I)
@@ -165,7 +165,6 @@ def handoff_violation(root, payload):
 
 
 PATCH_TARGET = re.compile(r'^\*\*\* (?:(?:Update|Add|Delete) File|Move to): *(.+?)\s*$', re.M)
-PATH_KEYS = ('file_path', 'path', 'notebook_path', 'filePath', 'TargetFile', 'AbsolutePath')
 
 
 def write_targets(ti):
@@ -175,7 +174,7 @@ def write_targets(ti):
         if '*** Begin Patch' in t:
             return PATCH_TARGET.findall(t)
     if isinstance(ti, dict):
-        found = [str(ti[k]) for k in PATH_KEYS if ti.get(k)]
+        found = [ti[k] for k in PATH_KEYS if isinstance(ti.get(k), str) and ti[k]]
         if found:
             return found
     return None
@@ -293,6 +292,7 @@ def tool_violation(cfg, payload, root=None):
 #      批准只从用户本人发出的消息（UserPromptSubmit）识别，由 Hook 记录到 APPROVALS，AI 不能写这个记录。
 #   2) 用户本人把维护开关文件的“开启”改为 true（长期放开）。开关文件与批准记录 AI 任何时候都不能写。
 LOCKED = ('.agents/skills/campus-job-application/', '.agents/skills/job-application-assistant-v2/',
+          '.agents/skills/campus-job-plan-inventory/', '.agents/skills/campus-job-preference-intake/',
           '.claude/settings.json', '.codex/hooks.json')
 SWITCH = '产品管理/组件维护.json'
 APPROVALS = '.runtime/组件维护批准.json'
@@ -345,12 +345,53 @@ APPROVAL_CONDITION = re.compile(r'如果|若(?!干)|假如|倘若|仅当|只有|
 APPROVAL_POST_CONDITION = re.compile(r'^\s*(?:(?:但|不过|且|同时|仅|只)\s*)?(?:前提|条件|必须|须|仅当|只有|除非|如果|若|待|等.{0,20}(?:后|再))')
 
 
+def direct_authority_text(prompt):
+    """Quoted examples and forwarded blocks are data, never an instruction."""
+    text = re.sub(r'(?ms)^\s*(`{3,}|~{3,})[^\n]*\n.*?^\s*\1[^\n]*', '\n', prompt)
+    text = re.sub(r'(?ms)^\s*(?:`{3,}|~{3,}).*$', '', text)
+    kept, quoted = [], False
+    for line in text.splitlines():
+        if not line.strip():
+            quoted = False; kept.append(line); continue
+        if re.match(r'^\s*>', line):
+            quoted = True
+        if not quoted: kept.append(line)
+    text = '\n'.join(kept)
+    text = re.sub(r'`[^`]*`', '', text, flags=re.S)
+    for opening, closing in [('“', '”'), ('‘', '’'), ('「', '」'), ('『', '』'), ('"', '"'), ("'", "'")]:
+        text = re.sub(re.escape(opening) + r'.*?' + re.escape(closing), '', text, flags=re.S)
+    return text
+
+
+def reported_authority(clause, action):
+    prefix = clause[:action.start()]
+    return bool(re.search(r'(?:说|回复|输入|发送|写道|写下|告诉|提到|引用|转述|转贴|转发|原话|示例|例如|比如).{0,24}$', prefix))
+
+
+def direct_revocation(prompt):
+    text = re.sub(r'\r?\n+', '，', direct_authority_text(prompt))
+    for sentence in re.split(r'(?<=[。；;！？!?])', text):
+        if sentence.rstrip().endswith(('?', '？')):
+            continue
+        clauses = [part.strip() for part in re.split(r'[,，]', sentence) if part.strip()]
+        for index, clause in enumerate(clauses):
+            match = REVOKE.search(clause)
+            if not match or reported_authority(clause, match):
+                continue
+            prefix = '，'.join(clauses[:index]) + clause[:match.start()]
+            if re.search(r'不|别|禁止|不要|是否', prefix) or APPROVAL_CONDITION.search(prefix + clause) or re.search(r'(?:吗|么)\s*$', clause):
+                continue
+            return True
+    return False
+
+
 def component_approval_quotes(prompt):
     """Return only unconditional, non-question authorization clauses.
 
     This consumes the existing host adapter's submitted user/answer text; it
     does not parse UI questions, change session identity or register approval.
     """
+    prompt = direct_authority_text(prompt)
     quotes = []
     # Newlines do not break a leading condition. Strong sentence punctuation
     # still lets a later unrelated question coexist with an earlier approval.
@@ -370,6 +411,9 @@ def component_approval_quotes(prompt):
         matched = False
         for index, clause in enumerate(clauses):
             if not (COMPONENT_WORD.search(clause) and APPROVE_MODIFY.search(clause)):
+                continue
+            action = APPROVE_MODIFY.search(clause)
+            if reported_authority(clause, action):
                 continue
             matched = True
             prefix = '，'.join(clauses[:index])
@@ -407,7 +451,7 @@ def record_approval(root, payload):
     data = {k: v for k, v in data.items() if v.get('expiresAt', 0) > now}
     note = ''
     approval_quotes = [quote for prompt in prompts for quote in component_approval_quotes(prompt)]
-    if any(REVOKE.search(p) for p in prompts):
+    if any(direct_revocation(p) for p in prompts):
         data.pop(sid, None)
         note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'
     elif approval_quotes:
@@ -492,7 +536,7 @@ def component_violation(root, payload):
     tool, ti = call_parts(payload)
     cwd = payload.get('cwd') or str(root)
     name = tool.rsplit('__', 1)[-1].rsplit('.', 1)[-1].lower()
-    if name in TEXT_TOOLS and not (isinstance(ti, dict) and any(k in ti for k in PATH_KEYS + ('attachments', 'attachment_path'))):
+    if text_only(name, ti):
         return None
     if isinstance(ti, dict) and isinstance(ti.get('command'), str) and ti['command'].strip() or SHELL_TOOL.search(tool) and not EDIT_TOOL.search(tool):
         raw = ti.get('command') if isinstance(ti, dict) and isinstance(ti.get('command'), str) else json.dumps(ti, ensure_ascii=False)

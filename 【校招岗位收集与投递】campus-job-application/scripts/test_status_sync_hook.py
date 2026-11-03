@@ -411,3 +411,50 @@ class ConversationReminderTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class QuotedMaintenanceAuthorityTests(unittest.TestCase):
+    def test_quoted_forwarded_and_example_approvals_are_not_authority(self):
+        examples = [
+            '下一步：新开一个对话，并在那个对话里说一句“批准修改组件”。',
+            '他说：批准修改组件。',
+            '请回复批准修改组件。',
+            '原话是：授权你改 Hook。',
+            '> 批准修改组件\n这里只是在引用。',
+            '```text\n批准修改组件\n```',
+            '`批准修改组件`',
+            '“批准修改组件”',
+            '```text\n批准修改组件',
+            '> 引用内容\n批准修改组件\n\n这里只是说明。',
+        ]
+        for prompt in examples:
+            with self.subTest(prompt=prompt):
+                self.assertEqual(hook.component_approval_quotes(prompt), [])
+
+    def test_direct_approval_survives_unrelated_quoted_text(self):
+        self.assertEqual(hook.component_approval_quotes('批准按上述范围修改组件，包含授权误判修复。'), ['批准按上述范围修改组件'])
+        self.assertEqual(hook.component_approval_quotes('批准修改组件。文档例句是“不要修改组件”。'), ['批准修改组件'])
+
+    def test_quoted_revocation_never_cancels_a_direct_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = {'session_id': 'current', 'prompt': '批准修改组件。说明里的“收回授权”只是示例。'}
+            self.assertIn('已记录用户批准', hook.record_approval(root, payload))
+            self.assertTrue(hook.approved(root, payload))
+            hook.record_approval(root, {'session_id': 'current', 'prompt': '收回授权'})
+            self.assertFalse(hook.approved(root, payload))
+
+class RevocationQuestionTests(unittest.TestCase):
+    def test_questions_conditions_and_reported_revocations_do_not_revoke(self):
+        for prompt in ['收回授权？','是否收回授权','如果测试失败，收回授权','他说：收回授权','不要收回授权']:
+            with self.subTest(prompt=prompt):self.assertFalse(hook.direct_revocation(prompt))
+        self.assertTrue(hook.direct_revocation('收回授权。'))
+
+class ExpandedComponentLockTests(unittest.TestCase):
+    def test_plan_and_preference_skills_require_the_same_session_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('campus-job-plan-inventory', 'campus-job-preference-intake'):
+                event = {'session_id':'owner','tool_name':'Write','tool_input':{'file_path':str(root/'.agents/skills'/name/'SKILL.md'),'content':'test'},'cwd':str(root)}
+                self.assertIn('组件只读', hook.component_violation(root,event))
+            hook.record_approval(root, {'session_id':'owner','prompt':'批准修改组件'})
+            self.assertIsNone(hook.component_violation(root,event))

@@ -102,7 +102,7 @@ def handoff_view(doc):
     roles = [{f: r.get(f) for f in EXEC_ROLE_FIELDS} for r in doc.get('岗位', []) if r['岗位编码'] in chosen]
     used = {r['站点编码'] for r in roles}
     sites = [{f: s.get(f) for f in EXEC_SITE_FIELDS} for s in doc.get('站点', []) if s['站点编码'] in used]
-    return {'公司编码': doc['公司编码'], '批次编号': batch.get('批次编号'), '执行': batch.get('执行'),
+    return {'公司编码': doc['公司编码'], '批次编号': batch.get('批次编号'),
             '岗位': sorted(roles, key=lambda r: r['岗位编码']), '站点': sorted(sites, key=lambda s: s['站点编码'])}
 
 
@@ -363,9 +363,9 @@ class Store:
         chosen_codes = select_companies(rows, ledger, requirements, names)  # 选不出公司时在写任何文件之前失败
         self.refresh()
         batch_id = 'B' + datetime.now().strftime('%Y%m%d%H%M%S')
-        execution = None
+        browser_channels = None
         if requirements.get('浏览器'):
-            execution = {'browserChannels': ['chrome', 'iab'] if requirements['浏览器'] == 'dual' else [requirements['浏览器']]}
+            browser_channels = ['chrome', 'iab'] if requirements['浏览器'] == 'dual' else [requirements['浏览器']]
         docs = self.docs()
         for code, d in docs.items():  # 只留本轮：其它公司的旧批次（已回写）清掉
             if code not in chosen_codes and d.get('批次'):
@@ -401,14 +401,17 @@ class Store:
                                      '原因': f'志愿分组「{g}」有 {len(orders)} 个待投递岗位，志愿顺序未由用户给全（现为 {orders}）；用 set-order 记录用户给定的顺序后重新生成'})
             ok = sorted([x for x in ok if x['志愿分组'] not in bad], key=lambda x: (x['志愿分组'], x.get('志愿顺序') or 1))
             doc['批次'] = {'批次编号': batch_id, '状态': '等待正向评审' if ok else NOT_HANDED, '公司顺序': order,
-                         '选中岗位': [x['岗位编码'] for x in ok], '排除': excluded, '执行': execution,
+                         '选中岗位': [x['岗位编码'] for x in ok], '排除': excluded,
                          '确认': None, '进度': None, '更新时间': now()}
             self.save(doc)
             summary['companies'] += bool(ok)
             summary['roles'] += len(ok)
             summary['excluded'] += len(excluded)
         self.review(batch_id)
-        return {'batchId': batch_id, **summary, 'review': str(self.review_file.relative_to(self.root))}
+        from browser_capabilities import application_policy_file
+        from application_requirements import save as save_execution_policy
+        save_execution_policy(application_policy_file(self.root), {'batchId': batch_id, 'browserChannels': browser_channels, 'authorizationRef': 'forward_requirements'})
+        return {'batchId': batch_id, **summary, 'browserChannels': browser_channels, 'review': str(self.review_file.relative_to(self.root))}
 
     def _fresh_view_matches(self, master, rows, doc):
         """确认前核对：用当前主表重建的执行内容与文件里的一致（用户看到的就是要确认的）。"""

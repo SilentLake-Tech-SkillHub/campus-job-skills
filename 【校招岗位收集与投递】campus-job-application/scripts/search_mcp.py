@@ -200,9 +200,13 @@ def search_batch_create(manifest:dict)->dict:
 
 
 @server.tool()
-def search_dispatch(batch_id:str,channels:list[str]=['chrome','iab'],lease_seconds:int=900,companies_per_channel:int=10)->dict:
+def search_dispatch(batch_id:str,channels:list[str]|None=None,lease_seconds:int=900,companies_per_channel:int=10)->dict:
     """Assign up to ten companies per browser by default; jobs/plans share their company lease. Host must execute browser calls."""
-    return queue().dispatch(batch_id,channels,lease_seconds,companies_per_channel)
+    from browser_capabilities import select_channels
+    root=os.environ.get('CAMPUS_RECRUITING_WORKSPACE')
+    if not root:raise ValueError('CAMPUS_RECRUITING_WORKSPACE_REQUIRED')
+    selection=select_channels(root,'search',channels)
+    return {**queue().dispatch(batch_id,selection['channels'],lease_seconds,companies_per_channel), 'browserSelection':selection}
 
 
 @server.tool()

@@ -12,7 +12,6 @@ from pathlib import Path
 
 from host_payload import call_parts
 
-PATH_KEYS = ('file_path', 'path', 'notebook_path', 'filePath', 'TargetFile', 'AbsolutePath')
 PATCH_HEADERS = re.compile(r'^\*\*\* (?:(?:Update|Add|Delete) File|Move to): *(.+?)\s*$', re.M)
 READ_TOOLS = {'read', 'read_file', 'readfile', 'view_image', 'get_file', 'open_file'}
 EDIT_TOOLS = {'write', 'write_file', 'edit', 'edit_file', 'replace', 'apply_patch', 'create_file', 'notebookedit'}
@@ -20,8 +19,34 @@ SHELL_TOOLS = {'bash', 'shell', 'exec', 'exec_command', 'execute_command', 'run_
 DISPLAY = {'echo', 'printf', 'true', 'false', 'pwd', 'date', 'which', 'command', 'ls', 'stat'}
 READ_COMMANDS = {'cat', 'head', 'tail', 'less', 'more', 'xxd', 'hexdump', 'strings', 'file', 'jq', 'wc', 'diff'}
 LITERAL = r'''("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')'''
-TEXT_TOOLS = {'request_user_input', 'request_user_input_async', 'send_message', 'send_message_to_thread',
-              'notify', 'text', 'askuserquestion', 'sendusermessage', 'todo_write', 'todo_read'}
+# Which host tools only carry text, and which argument names mean a file: ONE definition, owned by the
+# application component next to its own executor hook (sibling folder of this component). Missing or
+# unreadable: no tool is text-only and no argument name is trusted; file tools then fall back to the
+# registered-file scan in mentioned(), which still protects every registered data file.
+TOOL_ARGUMENTS_FILE = Path(__file__).resolve().parents[2] / 'job-application-assistant-v2/hooks/tool-arguments.json'
+
+
+def tool_arguments(spec_file=TOOL_ARGUMENTS_FILE):
+    try:
+        spec = json.loads(Path(spec_file).read_text(encoding='utf-8'))
+        return frozenset(t.lower() for t in spec['textTools']), tuple(spec['fileArgumentKeys'])
+    except (OSError, ValueError, KeyError, TypeError):
+        return frozenset(), ()
+
+
+TEXT_TOOLS, PATH_KEYS = tool_arguments()
+
+
+def _has_file_argument(value):
+    if isinstance(value, dict):
+        return any(k in PATH_KEYS or _has_file_argument(v) for k, v in value.items())
+    if isinstance(value, list):
+        return any(_has_file_argument(v) for v in value)
+    return False
+
+
+def text_only(name, ti):
+    return name in TEXT_TOOLS and isinstance(ti, dict) and not _has_file_argument(ti)
 
 
 @dataclass(frozen=True)
@@ -377,7 +402,7 @@ def file_effects(payload, root, registered=(), sync_script=None):
         directory = ti.get('workdir') or ti.get('cwd')
         if isinstance(directory, str): cwd = path_at(directory, cwd)
     out = []
-    if name in TEXT_TOOLS and not (isinstance(ti, dict) and any(k in ti for k in PATH_KEYS + ('attachments', 'attachment_path'))):
+    if text_only(name, ti):
         return []
     paths = [str(ti[k]) for k in PATH_KEYS if isinstance(ti, dict) and isinstance(ti.get(k), str)]
     if name == 'apply_patch':

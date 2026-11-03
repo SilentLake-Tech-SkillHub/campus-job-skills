@@ -1854,7 +1854,7 @@ def main():
     if a.cmd == 'check' and M.COUNTERS not in ctx.load_master():
         # 编码迁移前：行身份、名额归属都按编码算，旧数据没有编码，这些检查不适用（不报假问题）
         print(json.dumps({'migration_required': True,
-                          'note': '主表尚未做固定编码迁移（migrate_codes_step1.py）；迁移完成前编码、名额、状态核对不适用'}, ensure_ascii=False, indent=2))
+                          'note': '主表尚未完成固定编码建库；编码、名额、状态核对暂不适用'}, ensure_ascii=False, indent=2))
         return 0
     if a.cmd == 'check':
         m = ctx.load_master()

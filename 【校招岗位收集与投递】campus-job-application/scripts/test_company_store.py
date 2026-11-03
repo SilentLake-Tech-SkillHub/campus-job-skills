@@ -1,3 +1,5 @@
+from test_browser_capabilities import fixture_environment
+from unittest.mock import patch
 import json
 import os
 import subprocess
@@ -27,6 +29,7 @@ class CompanyStoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         r = self.root = Path(self.tmp.name)
+        environment=patch.dict(os.environ,fixture_environment(self.root));environment.start();self.addCleanup(environment.stop)
         (r / '产品管理').mkdir()
         (r / '岗位交接').mkdir()
         wb = Workbook()
@@ -114,7 +117,7 @@ class CompanyStoreTests(unittest.TestCase):
     def test_content_sha_matches_the_delivery_component_byte_for_byte(self):
         # 同一份宽表在投递组件 test/company-directory.test.mjs 里由 contentSha 算得同一个值
         doc = json.loads('{"schemaVersion": 3, "公司编码": "C00007", "公司名称": "网易", "志愿分组依据": null, "生成自": "test", "站点": [{"站点编码": "S0003", "站点": "https://campus.163.com", "登录链接": null, "账号核对页": null, "状态": "在用"}, {"站点编码": "S0004", "站点": "https://campus.game.163.com", "登录链接": "https://campus.game.163.com/login", "账号核对页": null, "状态": "在用"}, {"站点编码": "S0005", "站点": "https://leihuo.163.com", "登录链接": null, "账号核对页": null, "状态": "在用"}], "岗位": [{"岗位编码": "J000011", "地区": "中国大陆", "站点编码": "S0004", "岗位名称": "游戏产品经理", "岗位链接": "https://campus.game.163.com/job/4791", "投递链接": null, "官方岗位ID": "4791", "BU": null, "志愿分组": "公司", "志愿顺序": 2, "城市选项": ["杭州", "广州"], "投递状态": "岗位待投递", "链接说明": null, "材料": {"schemaVersion": 2, "items": [{"key": "referralCode", "status": "available", "value": "SampleCode17", "raw": "SampleCode17", "requireWhenAvailable": true, "evidence": {"岗位编码": "J000011", "column": "内推码", "cellSha256": "01ea865b8857c860a984e96930719596dbf5b4c002f7b3d00bb80d2da84b167e"}}]}}, {"岗位编码": "J000012", "地区": "中国大陆", "站点编码": "S0003", "岗位名称": "平台产品经理 “AI”", "岗位链接": "https://campus.163.com/job/88", "投递链接": null, "官方岗位ID": "88", "BU": null, "志愿分组": "公司", "志愿顺序": 1, "城市选项": [], "投递状态": "岗位待投递", "链接说明": null, "材料": {"schemaVersion": 2, "items": [{"key": "referralCode", "status": "available", "value": "SampleCode17", "raw": "SampleCode17", "requireWhenAvailable": true, "evidence": {"岗位编码": "J000012", "column": "内推码", "cellSha256": "01ea865b8857c860a984e96930719596dbf5b4c002f7b3d00bb80d2da84b167e"}}]}}, {"岗位编码": "J000013", "地区": "中国大陆", "站点编码": "S0005", "岗位名称": "美术", "岗位链接": "https://leihuo.163.com/j/1", "投递链接": null, "官方岗位ID": null, "BU": null, "志愿分组": "公司", "志愿顺序": null, "城市选项": [], "投递状态": "岗位待投递", "链接说明": null, "材料": {"schemaVersion": 2, "items": [{"key": "referralCode", "status": "available", "value": "SampleCode17", "raw": "SampleCode17", "requireWhenAvailable": true, "evidence": {"岗位编码": "J000013", "column": "内推码", "cellSha256": "01ea865b8857c860a984e96930719596dbf5b4c002f7b3d00bb80d2da84b167e"}}]}}], "批次": {"批次编号": "B1", "状态": "等待正向评审", "公司顺序": 1, "选中岗位": ["J000011", "J000012"], "排除": [], "执行": null, "确认": null, "进度": null, "更新时间": "t"}}')
-        self.assertEqual(C.content_sha(doc), '7ca793793dab099ae5b6e3a2d15207e2fb2d7fe501949a8944deadbc53b8c467')
+        self.assertEqual(C.content_sha(doc), '50bf6d2b79a12e94ac74c14fab716476814c507aecf1e48429b3103865a781e6')
 
     # ---------- 编码迁移首次写 Excel ----------
     def test_code_migration_first_write_requires_identical_statuses_and_runs_once(self):
@@ -177,7 +180,9 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual((out['companies'], out['roles'], out['excluded']), (1, 2, 0))
         self.assertTrue(out['requirementsCleared'])
         b = self.doc()['批次']
-        self.assertEqual((b['状态'], b['选中岗位'], b['执行']), ('等待正向评审', [J_GAME, J_AI], {'browserChannels': ['iab']}))
+        self.assertEqual((b['状态'], b['选中岗位']), ('等待正向评审', [J_GAME, J_AI]))
+        self.assertNotIn('执行',b)
+        self.assertEqual(json.loads((self.root/'.runtime/application/runs/batch-browser-policy.json').read_text())['browserChannels'],['iab'])
         self.assertEqual(json.loads(req.temp.read_text(encoding='utf-8')), {})
         self.assertEqual((self.root / '岗位交接/工作簿全量.json').read_bytes(), original)
 

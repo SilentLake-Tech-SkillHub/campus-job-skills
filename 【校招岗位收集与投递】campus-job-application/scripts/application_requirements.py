@@ -209,11 +209,18 @@ class Requirements:
             return {'askUserRequirements': ask, 'requirements': doc.get('requirements', {}),
                     'route': 'parameters' if doc else 'default_latest_10', 'turnId': current['turnId']}
 
-    def set(self, requirements, quote):
+    def set(self, requirements, quote, maintenance_clear=False):
         req = normalize(requirements)
         if not quote or not quote.strip():
             raise ValueError('需求写入须附用户原话')
+        from browser_capabilities import select_channels
+        browser_selection = select_channels(self.root, 'application', ['chrome', 'iab'] if req.get('浏览器') == 'dual' else [req['浏览器']]) if req.get('浏览器') else None
         with self.locked():
+            if maintenance_clear:
+                if req or read(self.temp):
+                    raise ValueError('维护清理只可初始化空需求，不能清除已有请求')
+                save(self.temp, {})
+                return {'stored': True, 'requirements': {}, 'maintenanceCleanup': True}
             state = read(self.state)
             current = self.context(state)
             self.document(current)  # Includes the cross-conversation ownership guard.
@@ -222,7 +229,7 @@ class Requirements:
             save(self.temp, doc)
             current.update(active=True, phase='parameters' if req else 'default')
             save(self.state, state)
-            return {'stored': True, 'route': 'parameters' if req else 'default_latest_10', 'requirements': req}
+            return {'stored': True, 'route': 'parameters' if req else 'default_latest_10', 'requirements': req, 'browserSelection': browser_selection}
 
     def build(self, builder):
         with self.locked():
@@ -283,6 +290,7 @@ def main():
     p = sub.add_parser('set')
     p.add_argument('--requirements', required=True, help='JSON对象；{} 表示默认')
     p.add_argument('--quote', required=True)
+    p.add_argument('--maintenance-clear', action='store_true')
     sub.add_parser('hook')
     a = ap.parse_args()
     if a.cmd == 'hook':
@@ -295,7 +303,7 @@ def main():
         print(json.dumps(out, ensure_ascii=False))
         return
     store = Requirements(a.workspace, a.session, a.turn)
-    out = store.begin() if a.cmd == 'begin' else store.set(json.loads(a.requirements), a.quote)
+    out = store.begin() if a.cmd == 'begin' else store.set(json.loads(a.requirements), a.quote, a.maintenance_clear)
     print(json.dumps(out, ensure_ascii=False, indent=2))
 
 

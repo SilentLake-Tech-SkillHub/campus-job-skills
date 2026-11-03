@@ -1,3 +1,4 @@
+from test_browser_capabilities import fixture_environment
 import asyncio
 import copy
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +14,7 @@ from search_queue import Queue,CHECKS,sha
 class SearchQueueTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name)
+        environment=patch.dict(os.environ,fixture_environment(self.root));environment.start();self.addCleanup(environment.stop)
         (self.root/'authorization.md').write_text('Synthetic test authorization',encoding='utf-8')
         self.q=Queue(self.root)
         self.manifest={'batch_id':'synthetic','scope':{'region':'synthetic'},'authorization_ref':'authorization.md',
@@ -121,7 +123,7 @@ class SearchQueueTests(unittest.TestCase):
 
     def test_real_mcp_stdio_protocol(self):
         from search_mcp_client import call
-        with patch.dict(os.environ,{'CAMPUS_SEARCH_PRIVATE_DIR':str(self.root)}):
+        with patch.dict(os.environ,{'CAMPUS_SEARCH_PRIVATE_DIR':str(self.root),'CAMPUS_RECRUITING_WORKSPACE':str(self.root)}):
             tools=asyncio.run(call({'method':'tools/list'}))
             self.assertIn('search_dispatch',{t['name'] for t in tools['tools']})
             result=asyncio.run(call({'tool':'search_dispatch','arguments':{'batch_id':'synthetic'}}))
