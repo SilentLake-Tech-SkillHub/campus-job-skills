@@ -20,7 +20,7 @@
 | `recruiting_apply_link_preview` | `set-apply-link --preview` | 只读：按岗位编码设置或清空投递链接（须与岗位站点同域），生成“投递链接 X → Y” |
 | `recruiting_apply_link_confirm` | `set-apply-link --quote` | 用户确认后写投递链接 |
 | `recruiting_site_links_preview` | `set-site-links --preview` | 只读：按站点编码设置登录链接、账号核对页（核对页不能为空），生成“当前 → 更新” |
-| `recruiting_site_links_confirm` | `set-site-links --quote` | 用户确认后写站点链接 |
+| `recruiting_site_links_confirm` | `set-site-links --quote` | 用户确认后写站点链接；停用重复站点须指定同公司保留站点并传预览指纹 |
 | `recruiting_json_write_excel` | `write` | 唯一写 Excel 的入口，写后逐格读回 |
 | `recruiting_sync_pending` | `pending` / `diff` | 是否有未写入 Excel 的改动及逐格差异 |
 | `recruiting_write_defer` | `defer` | 用户选择“下一轮再写入”时登记原话 |

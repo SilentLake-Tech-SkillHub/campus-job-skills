@@ -1476,9 +1476,9 @@ def set_apply_link(ctx, items, quote, preview=False, allow_in_batch=False):
 SITE_LINK_FIELDS = ('登录链接', '账号核对页')
 
 
-def set_site_links(ctx, items, quote, preview=False, allow_in_batch=False):
+def set_site_links(ctx, items, quote, preview=False, allow_in_batch=False, expected_sha=None):
     """写入或更换站点的登录链接、账号核对页（按站点编码）。登录链接可为空（该站点没有单独的登录界面，只能在岗位页登录）。
-    items：[{code: 站点编码, 登录链接?: url|null, 账号核对页?: url}]。"""
+    items：[{code: 站点编码, 登录链接?: url|null, 账号核对页?: url, retire_to?: 保留站点编码}]。"""
     if not preview and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户确认原话')
     master = ctx.load_master()
@@ -1486,11 +1486,34 @@ def set_site_links(ctx, items, quote, preview=False, allow_in_batch=False):
     site_sheet = sheet_of(master, M.SITE_SHEET)
     sidx = headers(site_sheet)
     plan, lines = [], []
+    retiring = {d.get('code') for d in items if 'retire_to' in d}
+    seen = set()
     for d in items:
         code = d.get('code')
+        if code in seen:
+            raise SystemExit(f'站点编码重复：{code}')
+        seen.add(code)
         site = all_sites.get(code)
         if not site:
             raise SystemExit(f'站点编码不存在：{code}')
+        if 'retire_to' in d:
+            keep_code = d['retire_to']
+            kept = all_sites.get(keep_code)
+            if not kept or keep_code in retiring or kept['公司编码'] != site['公司编码'] or kept['状态'] == M.SITE_RETIRED:
+                raise SystemExit(f'{code} 必须明确同公司且继续在用的保留站点')
+            if any(field in d for field in SITE_LINK_FIELDS):
+                raise SystemExit(f'{code} 停用与链接变更必须分开预览')
+            for name in ctx.sheets:
+                sheet = sheet_of(master, name)
+                idx = headers(sheet)
+                if any(row['row'] > 1 and cell_value(row, idx[M.SITE_CODE_COL]) == code for row in sheet['rows']):
+                    raise SystemExit(f'{code} 仍有岗位引用，先用 relink 核对并迁移现有岗位')
+            if site['状态'] != M.SITE_RETIRED:
+                line = (f"{M.company_name(master, site['公司编码'])}｜站点 {site['站点']}（{code}）："
+                        f"「{site['状态']}」→「{M.SITE_RETIRED}」，保留 {kept['站点']}（{keep_code}）")
+                plan.append((site['row'], sidx['状态'], M.SITE_RETIRED, code, '状态', line))
+                lines.append(line)
+            continue
         for field in SITE_LINK_FIELDS:
             if field not in d:
                 continue
@@ -1507,10 +1530,14 @@ def set_site_links(ctx, items, quote, preview=False, allow_in_batch=False):
             plan.append((site['row'], sidx[field], new, code, field, line))
             lines.append(line)
     _guard_batch(ctx, [p[3] for p in plan], allow_in_batch, master)
+    preview_sha = digest({'items': items, 'lines': lines})
     if preview:
-        return {'show_user_exactly': lines,
-                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行'}
-    _confirm_values(ctx, master, plan, quote, 'set-site-links')
+        return {'show_user_exactly': lines, **({'preview_sha': preview_sha} if retiring else {}),
+                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 加 --quote 执行；停用站点还须传 --expect-sha'}
+    if retiring and expected_sha != preview_sha:
+        raise SystemExit('停用站点须提供当前预览指纹，内容已变更时须重新确认')
+    if plan:
+        _confirm_values(ctx, master, plan, quote, 'set-site-links')
     return {'updated': sorted({p[3] for p in plan}), 'excel_written': False}
 
 
@@ -1823,8 +1850,9 @@ def main():
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
     p.add_argument('--preview', action='store_true')
     p = sub.add_parser('set-site-links')
-    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 站点编码, 登录链接?: url|null, 账号核对页?: url}]')
+    p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 站点编码, 登录链接?: url|null, 账号核对页?: url, retire_to?: 保留站点编码}]')
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
+    p.add_argument('--expect-sha', help='停用站点时使用当前预览指纹')
     p.add_argument('--preview', action='store_true')
     p = sub.add_parser('set-order')
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, 志愿顺序: 正整数|null}]')
@@ -1925,7 +1953,8 @@ def main():
             out = fn(ctx, read(a.input), a.quote, preview=True)
         else:
             with exclusive(ctx):
-                out = fn(ctx, read(a.input), a.quote)
+                opts = {'expected_sha': a.expect_sha} if a.cmd == 'set-site-links' else {}
+                out = fn(ctx, read(a.input), a.quote, **opts)
     elif a.cmd == 'set-order':
         with exclusive(ctx):
             out = set_order(ctx, read(a.input), a.quote)

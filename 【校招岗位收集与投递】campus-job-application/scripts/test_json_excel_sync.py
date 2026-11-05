@@ -532,6 +532,31 @@ class SyncTests(unittest.TestCase):
         self.run_cmd('write')
         self.assertEqual(load_workbook(self.root / 'book.xlsx')['投递站点'].cell(2, 6).value, 'https://a.example/me')
 
+    def test_duplicate_site_retirement_requires_same_company_and_no_role_references(self):
+        self.migrate()
+        m = self.master()
+        keep = M.site_of(m, 'C00001', 'https://a.example')
+        duplicate = M.ensure_site(m, 'C00001', 'https://portal.a.example')
+        foreign = M.ensure_site(m, 'C00002', 'https://b.example')
+        S.refresh_digest(m)
+        master_path = self.root / '岗位交接/工作簿全量.json'
+        master_path.write_text(json.dumps(m, ensure_ascii=False), encoding='utf-8')
+        before = master_path.read_bytes()
+        for old, new, reason in ((keep, duplicate, '仍有岗位引用'), (duplicate, foreign, '同公司')):
+            result = self.run_cmd('set-site-links', '--input', self.items([{'code': old, 'retire_to': new}]), '--preview', ok=False)
+            self.assertIn(reason, result.stderr)
+        request = self.items([{'code': duplicate, 'retire_to': keep}])
+        preview = json.loads(self.run_cmd('set-site-links', '--input', request, '--preview').stdout)
+        self.assertEqual(len(preview['show_user_exactly']), 1)
+        self.assertIn('「在用」→「停用」', preview['show_user_exactly'][0])
+        self.assertEqual(master_path.read_bytes(), before)
+        self.assertIn('预览指纹', self.run_cmd('set-site-links', '--input', request, '--quote', '确认停用重复的空站点', ok=False).stderr)
+        self.run_cmd('set-site-links', '--input', request, '--quote', '确认停用重复的空站点', '--expect-sha', preview['preview_sha'])
+        sites = M.sites(self.master())
+        self.assertEqual(sites[duplicate]['状态'], M.SITE_RETIRED)
+        self.assertEqual(sites[keep]['状态'], M.SITE_ACTIVE)
+        self.assertEqual(self.code(0), 'J000001')
+
     def test_link_exception_note_only_by_command(self):
         """链接例外备注只能由 link-exception 写：upsert 写或改都拒绝；预览不改文件；确认后记入台账；可撤销；绕过脚本写入的被门禁拦下。"""
         self.migrate()
