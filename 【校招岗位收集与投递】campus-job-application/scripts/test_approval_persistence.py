@@ -91,6 +91,17 @@ class ApprovalPersistenceTests(unittest.TestCase):
    debug=json.loads((root/'.runtime/组件软锁诊断.json').read_text())
    self.assertEqual(debug['approvalPath'],str((root/hook.APPROVALS).resolve()))
    self.assertEqual(debug['session'],'one');self.assertTrue(debug['approved'])
+   self.assertEqual(debug['lastApproval']['session'],'one')
+   self.assertTrue(debug['lastApproval']['saved'])
+   self.assertEqual(debug['lastCheck']['session'],'one')
+   self.assertTrue(debug['lastCheck']['approved'])
+   self.assertNotIn('prompt',debug['lastApproval'])
+   hook.approved(root,{'session_id':'another'})
+   latest=json.loads((root/'.runtime/组件软锁诊断.json').read_text())
+   self.assertEqual(latest['lastApproval'],debug['lastApproval'])
+   self.assertEqual(latest['lastCheck']['session'],'another')
+   self.assertFalse(latest['lastCheck']['approved'])
+
 
  def test_maintenance_switch_is_reported_as_its_own_authorization_source(self):
   with tempfile.TemporaryDirectory() as td:
