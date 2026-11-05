@@ -1,7 +1,7 @@
-__pycache__/
-*.pyc
 .DS_Store
-*.private.md
-**/private/
-
-README-preview.html
+**/.DS_Store
+**/__pycache__/
+**/*.pyc
+**/node_modules/
+job-application-assistant-v2/
+resume-authoring/

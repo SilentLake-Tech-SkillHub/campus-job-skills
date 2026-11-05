@@ -875,5 +875,111 @@
     }
    ]
   }
+ },
+ {
+  "name": "var-outside-from-registered-dir",
+  "allow": true,
+  "cwd": "{{ROOT}}/company",
+  "tool": "Bash",
+  "args": {
+   "command": "SP=/private/tmp/outside; echo hi > \"$SP/out\""
+  }
+ },
+ {
+  "name": "var-assigned-registered-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "P=book.xlsx; echo hi > \"$P\""
+  }
+ },
+ {
+  "name": "var-unset-in-registered-dir",
+  "allow": false,
+  "cwd": "{{ROOT}}/company",
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi > \"$SP_NOT_SET_ANYWHERE/out\""
+  }
+ },
+ {
+  "name": "heredoc-comparison-bait",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 - <<'EOF'\nfor i in range(3):\n    if i>=0: print(i)\nEOF"
+  }
+ },
+ {
+  "name": "heredoc-redirect-to-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 - <<'EOF'\necho hi > book.xlsx\nEOF"
+  }
+ },
+ {
+  "name": "redirect-both-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi &> data/main.json"
+  }
+ },
+ {
+  "name": "redirect-both-append-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi &>> data/main.json"
+  }
+ },
+ {
+  "name": "redirect-clobber-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi >| data/main.json"
+  }
+ },
+ {
+  "name": "redirect-dup-form-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi >& data/main.json"
+  }
+ },
+ {
+  "name": "redirect-clobber-in-bash-c",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "bash -c 'echo hi >| data/main.json'"
+  }
+ },
+ {
+  "name": "copy-target-before-null-redirect",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cp other/note data/main.json 2>/dev/null"
+  }
+ },
+ {
+  "name": "copy-target-before-descriptor-redirect",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cp other/note data/main.json 2>&1"
+  }
+ },
+ {
+  "name": "descriptor-redirect-outside-registered",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "ls other >&2; ls other 2>&1; ls other 2>&-; ls other &>/dev/null; ls other >|/dev/null"
+  }
  }
 ]

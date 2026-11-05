@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -458,3 +459,267 @@ class ExpandedComponentLockTests(unittest.TestCase):
                 self.assertIn('组件只读', hook.component_violation(root,event))
             hook.record_approval(root, {'session_id':'owner','prompt':'批准修改组件'})
             self.assertIsNone(hook.component_violation(root,event))
+
+
+class InjectedRuleTextIsNotApprovalTests(unittest.TestCase):
+    """DSH joins the queued SessionStart context into the `prompt` of the user's first message."""
+    RULE = '用户在对话里明确批准修改组件后，本会话可以修改（12 小时内有效，用户说“收回授权”即失效）。'
+
+    def workspace(self, tmp):
+        root = Path(tmp).resolve()
+        (root / '产品管理').mkdir()
+        cfg = {'schemaVersion': 1, 'rowKind': 'role', 'labels': [{'value': '岗位待投递', 'definition': '待投递'}],
+               'workbook': 'book.xlsx', 'masterData': 'main.json', 'confirmationLedger': 'ledger.json',
+               'column': '投递状态', 'sheets': []}
+        (root / hook.LABELS_FILE).write_text(json.dumps(cfg, ensure_ascii=False), encoding='utf-8')
+        return root, hook.rules_text(cfg, root) + hook.browser_rules(root)
+
+    def test_rule_wording_alone_is_not_an_approval(self):
+        self.assertEqual(hook.component_approval_quotes(self.RULE), [])
+        self.assertEqual(hook.component_approval_quotes('用户在对话里明确批准修改组件后'), [])
+        self.assertEqual(hook.component_approval_quotes('批准修改组件后'), [])
+        self.assertEqual(hook.component_approval_quotes('须用户批准修改组件'), [])
+
+    def test_injected_rules_joined_with_a_plain_message_record_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, injected = self.workspace(tmp)
+            for prompt in (injected, injected + '\n继续', '继续\n' + injected, injected + '\n\n继续'):
+                with self.subTest(prompt=prompt[-20:]):
+                    payload = {'session_id': 'dsh', 'prompt': prompt}
+                    self.assertNotIn('已记录用户批准', hook.record_approval(root, payload))
+                    self.assertFalse(hook.approved(root, payload))
+
+    def test_rules_changed_after_injection_still_do_not_approve(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, injected = self.workspace(tmp)
+            payload = {'session_id': 'dsh', 'prompt': injected.replace('12 小时', '24 小时') + '\n继续'}
+            self.assertNotIn('已记录用户批准', hook.record_approval(root, payload))
+            self.assertFalse(hook.approved(root, payload))
+
+    def test_real_words_next_to_injected_rules_still_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, injected = self.workspace(tmp)
+            payload = {'session_id': 'dsh', 'prompt': injected + '\n批准修改组件'}
+            self.assertIn('已记录用户批准', hook.record_approval(root, payload))
+            quote = json.loads((root / hook.APPROVALS).read_text(encoding='utf-8'))['dsh']['userQuote']
+            self.assertEqual(quote, '批准修改组件')
+            # The rule's own mention of revoking never cancels; the user's own words do.
+            hook.record_approval(root, {'session_id': 'dsh', 'prompt': injected + '\n继续'})
+            self.assertTrue(hook.approved(root, payload))
+            hook.record_approval(root, {'session_id': 'dsh', 'prompt': injected + '\n收回授权'})
+            self.assertFalse(hook.approved(root, payload))
+
+    def test_explicit_approvals_are_recognized_as_before(self):
+        for prompt, quote in [('批准修改组件', '批准修改组件'), ('授权你改 Hook', '授权你改 Hook'),
+                              ('内部组件本次授权给你修改', '内部组件本次授权给你修改'),
+                              ('我作为用户批准修改组件', '我作为用户批准修改组件'),
+                              ('看完方案后，批准修改组件', '批准修改组件')]:
+            with self.subTest(prompt=prompt):
+                self.assertEqual(hook.component_approval_quotes(prompt), [quote])
+
+
+class ReadOnlyCommandsAreNotWritesTests(unittest.TestCase):
+    V2 = '.agents/skills/job-application-assistant-v2'
+    SP = '/private/tmp/scratch-not-in-workspace'
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        (self.root / '产品管理').mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def verdict(self, command, cwd=None):
+        return hook.component_violation(self.root, {
+            'tool_name': 'Bash', 'tool_input': {'command': command}, 'session_id': 'locked',
+            'cwd': str(self.root / cwd) if cwd else str(self.root)})
+
+    def test_commands_that_were_really_blocked_now_pass(self):
+        v2 = self.V2
+        for command in [
+            # The three commands the lock refused in practice.
+            f'cd "{self.root}/{v2}" && SP={self.SP}; (time node --test test/*.test.mjs) > "$SP/baseline-node.txt" 2>&1; tail -14 "$SP/baseline-node.txt"; git status --short',
+            f"cd {v2} && grep -n ensureGroups shared/browser.mjs | cut -c1-120; awk '/async ensureGroups/{{f=1}} f{{print; n++}} n>=30{{exit}}' shared/browser.mjs | cut -c1-260",
+            f"cd {v2} && python3 - <<'EOF'\nimport json\nfor i in range(9, -1, -1):\n    if i>=0: print(i, \"don't\")\nEOF",
+        ]:
+            with self.subTest(command=command[:60]):
+                self.assertIsNone(self.verdict(command))
+
+    def test_comparisons_and_text_inside_the_component_directory_pass(self):
+        for command in [
+            "node -e 'for(let i=9;i>=0;i--)console.log(i)'",
+            "node -e 'const f = x => x.length; if (a > b.length) f(a)'",
+            'python3 -c "print([x for x in rows if x > 3])"',
+            "grep -n 'n>=30' SKILL.md",
+            "printf 'a>b' SKILL.md",
+            "grep -n 'foo > bar.txt' SKILL.md",
+            "awk '$1>$2' SKILL.md",
+            'for ((i=0;i>=0;i--)); do echo "$i"; done',
+            'if [[ "$a" > "$b" ]]; then echo y; fi',
+            'echo $(( n > 3 ))',
+            "# don't write a > b.txt\ncat SKILL.md",
+            "cat > /tmp/out.txt <<'EOF'\nif a > b.txt\nEOF",
+        ]:
+            with self.subTest(command=command[:60]):
+                self.assertIsNone(self.verdict(command, self.V2))
+
+    def test_variable_paths_resolve_before_judging(self):
+        os.environ['HOOK_TEST_OUT'] = self.SP
+        self.addCleanup(os.environ.pop, 'HOOK_TEST_OUT', None)
+        for command in [f'SP={self.SP}; ls > "$SP/x.txt"', f'export SP={self.SP}; ls > ${{SP}}/x.txt',
+                        'ls > "$HOOK_TEST_OUT/x.txt"', f'SP={self.SP}; S2="$SP/a"; ls > "$S2/x.txt"',
+                        f'D={self.SP}; cp SKILL.md "$D/x.txt"']:
+            with self.subTest(command=command):
+                self.assertIsNone(self.verdict(command, self.V2))
+
+    def test_real_writes_are_still_blocked(self):
+        v2 = self.V2
+        inside = [
+            'echo hi > a.txt', 'echo hi >> a.txt', 'echo hi>a.txt', 'echo n>=30', 'ls > "$SP_NOT_SET_ANYWHERE/x.txt"',
+            'ls > $(mktemp)', 'T=$(mktemp); ls > "$T"', 'X=a.txt; echo hi > "$X"', 'cat > a.txt <<EOF\nbody\nEOF',
+            "python3 -c \"import os; os.system('echo hi > a.txt')\"", "bash -c 'echo hi > a.txt'", 'eval "echo hi > a.txt"',
+            "awk '{print > \"out\"}' SKILL.md", 'x="$(echo hi > out)"', 'bash <<EOF\necho hi > out\nEOF',
+            "cat <<EOF | sh\necho hi > out\nEOF", "sed -i '' s/a/b/ SKILL.md", "echo 'unterminated > a.txt",
+        ]
+        for command in inside:
+            with self.subTest(command=command):
+                self.assertIn('组件只读', self.verdict(command, v2) or '')
+        anywhere = [
+            f'echo hi > {v2}/a.txt', f"echo hi >> '{v2}/a.txt'", f'P={v2}/a.txt; echo hi > "$P"',
+            f'ROOT={self.root}; echo hi > "$ROOT/{v2}/a.txt"', f'cd {v2}; D={self.SP}; X=a.txt; echo hi > $X',
+            f"python3 -c \"import os; os.system('echo hi > {v2}/a.txt')\"", f"bash -c 'echo hi > {v2}/a.txt'",
+            f"python3 - <<'EOF'\nimport os\nos.system('echo hi > {v2}/a.txt')\nEOF",
+            f'D={v2}; cp /tmp/a "$D/a.txt"', f'D={v2}; rm "$D/a.txt"', f'D={v2}; cd "$D"; rm a.txt',
+        ]
+        for command in anywhere:
+            with self.subTest(command=command):
+                self.assertIn('组件只读', self.verdict(command) or '')
+        self.assertIn('只能由用户本人修改', self.verdict(f'P={hook.SWITCH}; echo x > "$P"') or '')
+
+    def test_stack_rule_reads_heredocs_and_variables_the_same_way(self):
+        (self.root / '岗位交接').mkdir()
+        gate = lambda command: hook.stack_violation(self.root, {
+            'tool_name': 'Bash', 'tool_input': {'command': command}, 'cwd': str(self.root / '岗位交接')})
+        for command in [f'SP={self.SP}; ls > "$SP/x.txt"', "python3 - <<'EOF'\nfor i in x:\n    if i>=0: pass\nEOF"]:
+            with self.subTest(command=command):
+                self.assertIsNone(gate(command))
+        for command in ['ls > x.txt', 'X=x.txt; ls > "$X"', 'ls > "$SP_NOT_SET_ANYWHERE/x.txt"',
+                        'cat <<EOF > x.txt\nbody\nEOF']:
+            with self.subTest(command=command):
+                self.assertIn('记录唯一门禁', gate(command) or '')
+
+
+class RedirectFormsAndLinkTargetsTests(unittest.TestCase):
+    V2 = '.agents/skills/job-application-assistant-v2'
+    WRITE_OPS = ('1>', '2>', '3>', '&>', '>|', '>&', '1>>', '2>>', '&>>')
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        (self.root / '产品管理').mkdir()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def verdict(self, command, cwd=None):
+        return hook.component_violation(self.root, {
+            'tool_name': 'Bash', 'tool_input': {'command': command}, 'session_id': 'locked',
+            'cwd': str(self.root / cwd) if cwd else str(self.root)})
+
+    def assert_blocked(self, commands, cwd=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIn('组件只读', self.verdict(command, cwd) or '')
+
+    def assert_passes(self, commands, cwd=None):
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIsNone(self.verdict(command, cwd))
+
+    def test_every_redirect_form_writing_to_a_locked_path_is_blocked(self):
+        v2 = self.V2
+        self.assert_blocked([f'echo hi {op} {v2}/a.txt' for op in self.WRITE_OPS])
+        self.assert_blocked([f'echo hi {op}{v2}/a.txt' for op in self.WRITE_OPS])
+        self.assert_blocked([f'echo hi {op} a.txt' for op in self.WRITE_OPS], v2)
+        self.assert_blocked([
+            f'P={v2}/a.txt; echo hi 2> "$P"', f'P={v2}/a.txt; echo hi >| "$P"', f"echo hi 2> '{v2}/a.txt'",
+            f'echo hi >| {v2}/a.txt | cat', f'ls 2>&1 >| {v2}/a.txt', f'ls /nope 2> {v2}/a.txt >/dev/null',
+        ])
+        self.assertIn('只能由用户本人修改', self.verdict(f'echo x 2> {hook.SWITCH}') or '')
+        self.assertIn('只能由用户本人修改', self.verdict(f'echo x >| {hook.SWITCH}') or '')
+
+    def test_redirects_inside_text_that_runs_are_blocked(self):
+        v2 = self.V2
+        self.assert_blocked([f"bash -c 'echo hi {op} {v2}/a.txt'" for op in self.WRITE_OPS])
+
+    def test_descriptor_and_null_redirects_are_not_writes(self):
+        self.assert_passes([
+            'ls 2>&1', 'ls 2>&1 | head -3', 'ls >&2', 'ls 1>&2', 'ls 2>&-', 'ls >&-', 'ls >/dev/null 2>&1',
+            'ls 2>/dev/null', 'ls 2> /dev/null', 'ls 1>/dev/null', 'ls &>/dev/null', 'ls &> /dev/null',
+            'ls >|/dev/null', 'ls 2>>/dev/null',
+            'echo hi 2> /tmp/x.txt', 'echo hi >| /tmp/x.txt', 'echo hi &> /tmp/x.txt', 'echo hi >& /tmp/x.txt',
+            'cat SKILL.md | head -3', 'ls || echo none', 'mkdir -p /tmp/x 2>/dev/null', 'rm -f /tmp/x 2>/dev/null',
+            "bash -c 'ls 2>&1'", "bash -c 'echo hi >&2'", 'bash -c "ls >/dev/null 2>&1"',
+        ], self.V2)
+
+    def test_redirect_characters_in_data_are_not_writes(self):
+        self.assert_passes(["grep -n '2> x.txt' SKILL.md", "grep -n '>|' SKILL.md", 'echo $(( 2>1 ))',
+                            'if [[ 2>1 ]]; then echo y; fi', "# echo 2> a.txt\ncat SKILL.md",
+                            "cat > /tmp/out.txt <<'EOF'\necho 2> a.txt\necho >| a.txt\nEOF"], self.V2)
+
+    def test_a_trailing_redirect_does_not_hide_the_real_target(self):
+        v2 = self.V2
+        self.assert_blocked([f'ln -s /tmp/x {v2}/a {tail}' for tail in ('2>/dev/null', '> /dev/null', '2>&1', '>/dev/null 2>&1')])
+        self.assert_blocked([f'cp /tmp/x {v2}/a 2>/dev/null', f'cp /tmp/x {v2}/a > /dev/null'])
+
+    def test_link_sources_are_not_writes(self):
+        v2, abs_v2 = self.V2, f'{self.root}/{self.V2}'
+        self.assert_passes([
+            f'ln -s {v2}/SKILL.md /tmp/x', f'ln -sf {abs_v2}/SKILL.md /tmp/x', f'ln {v2}/SKILL.md /tmp/x',
+            f'ln -s {v2}/a {v2}/b /tmp/dir', f'ln -s {v2}/SKILL.md', f'ln -s {v2}/SKILL.md /tmp/x 2>/dev/null',
+            f'ln -s {v2}/SKILL.md -t /tmp', f'ln -t /tmp -s {v2}/SKILL.md', f'ln -st /tmp {v2}/SKILL.md',
+            f'ln --target-directory=/tmp {v2}/SKILL.md', f'ln --target-directory /tmp {v2}/SKILL.md',
+        ])
+
+    def test_link_locations_are_still_writes(self):
+        v2 = self.V2
+        self.assert_blocked([
+            f'ln -s /tmp/x {v2}/a', f'ln -sf {v2}/a {v2}/b', f'ln /tmp/x {v2}/a', f'ln -sfn /tmp/x {v2}',
+            f'ln -s /tmp/a /tmp/b {v2}/', f'ln -s /tmp/x -t {v2}', f'ln -t {v2} /tmp/x', f'ln -st {v2} /tmp/x',
+            f'ln -t{v2} /tmp/x', f'ln --target-directory={v2} /tmp/x', f'ln --target-directory {v2} /tmp/x',
+        ])
+        self.assert_blocked(['ln -s /tmp/x', 'ln -s /tmp/x a', 'ln -s /tmp/x -t .', f'cd {self.root}/{v2}; ln -s /tmp/x'], v2)
+        self.assertIn('只能由用户本人修改', self.verdict(f'ln -s /tmp/x {hook.SWITCH}') or '')
+
+    def stack_gate(self, command, cwd='岗位交接'):
+        (self.root / cwd).mkdir(exist_ok=True)
+        return hook.stack_violation(self.root, {
+            'tool_name': 'Bash', 'tool_input': {'command': command}, 'cwd': str(self.root / cwd)})
+
+    def test_stack_rule_sees_every_redirect_form(self):
+        for command in [f'echo hi {op} {target}' for op in self.WRITE_OPS + ('>', '>>')
+                        for target in ('x.txt', '"x.txt"')] + [
+            'echo hi >|x.txt', 'echo hi &>x.txt', 'echo hi>&x.txt', "bash -c 'echo hi >| x.txt'",
+            'y=$(echo hi &> x.txt)', 'X=x.txt; echo hi >| "$X"', 'ls 2>&1 >| x.txt',
+            'cp /tmp/a x.txt 2>/dev/null', 'cp /tmp/a x.txt 2>&1', 'cp /tmp/a x.txt >/dev/null 2>&1',
+        ]:
+            with self.subTest(command=command):
+                self.assertIn('记录唯一门禁', self.stack_gate(command) or '')
+        self.assertIn('记录唯一门禁', self.stack_gate('echo hi &> x-副本.txt', '产品管理') or '')
+
+    def test_stack_rule_ignores_descriptors_null_and_quoted_operators(self):
+        for command in [
+            'ls 2>&1', 'ls 2>&1 | head -3', 'ls >&2', 'ls 1>&2', 'ls 2>&-', 'ls >&-', 'ls >/dev/null 2>&1',
+            'ls 2>/dev/null', 'ls 1>/dev/null', 'ls &>/dev/null', 'ls &>>/dev/null', 'ls >|/dev/null', 'ls >&/dev/null',
+            'echo hi &> /tmp/x.txt', 'echo hi >| /tmp/x.txt', 'echo hi >& /tmp/x.txt',
+            "grep -n '>|' x.txt", 'grep -n "&>" x.txt', "echo '>&' x.txt", "echo '>' x.txt", "printf '%s' \">>\" x.txt",
+            "cat <<'EOF'\necho hi &> out\necho hi >| out\necho hi >& out\nEOF",
+        ]:
+            with self.subTest(command=command):
+                self.assertIsNone(self.stack_gate(command))
+
+    def test_writing_through_an_outside_link_is_a_known_gap(self):
+        # Targets are normalized, not resolved, so a link made outside the lock
+        # can be written through. Tightening this needs symlink resolution.
+        self.assertIsNone(self.verdict(f'ln -s {self.V2} /tmp/x; echo hi > /tmp/x/a.txt'))

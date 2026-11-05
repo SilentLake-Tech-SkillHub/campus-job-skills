@@ -20,7 +20,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_payload import (call_parts, _session, PROMPT_KEYS, _prompt, QUESTION_REPLY_TAG, QUESTION_REPLY,
                           QUESTION_CALL_ID, _approval_prompts)
-from hook_file_policy import file_effects, path_at, touches, mentioned, text_only, PATH_KEYS
+from hook_file_policy import (file_effects, path_at, touches, mentioned, text_only, PATH_KEYS,
+                              blank_data_redirects, expand_vars, note_assignments)
 
 SCRIPT = Path(__file__).with_name('json_excel_sync.py')
 EDIT_TOOL = re.compile(r'(write|edit|patch|replace|create|insert|notebook)', re.I)
@@ -302,9 +303,13 @@ APPROVE_MODIFY = re.compile(r'(批准|授权|同意|允许).{0,6}(修改|改|维
 CONDITIONAL = re.compile(r'情况下|的话|前提|时才|之后才|需要.{0,4}(批准|授权)|是否')
 NEGATED = re.compile(r'(不|别|禁止|不要|不准|不许)\s*(批准|授权|同意|允许|修改|改|维护)')
 REVOKE = re.compile(r'(收回|撤销|撤回|取消|结束)\s*(组件)?\s*(维护)?\s*(授权|批准|维护)|锁上组件|锁回组件|恢复只读')
-SEGMENT = re.compile(r'&&|\|\||;|\n|\|')
-REDIRECT = re.compile(r'(?:^|[^0-9&>])>{1,2}\s*([^\s&;|>][^\s;&|]*)')
-IN_PLACE = {'sed', 'perl', 'truncate', 'touch', 'chmod', 'chown', 'rm', 'rmdir', 'unlink', 'patch', 'ln', 'install', 'tee', 'mkdir'}
+SEGMENT = re.compile(r'&&|\|\||;|\n|(?<!>)\|')  # `>|` 是重定向，不是管道
+REDIRECT = re.compile(r'(?<!>)>{1,2}(\|?&?)\s*([^\s&;|>][^\s;&|]*)')  # 含 1> 2> &> >| >&
+DESCRIPTOR = re.compile(r'\d+-?|-')  # `>&` 后面是这些时只是复制或关闭描述符，不写文件
+REDIRECT_TOKEN = re.compile(r'(?:\d+|&)?>')
+BARE_REDIRECT = re.compile(r'(?:\d*|&)>{1,2}\|?&?')  # 整个词就是操作符，目标在下一个词
+LN_TARGET_DIR = re.compile(r'(?:--t[a-z-]*=?|-[bdFfiLnPrsTv]*t)(.*)')
+IN_PLACE = {'sed', 'perl', 'truncate', 'touch', 'chmod', 'chown', 'rm', 'rmdir', 'unlink', 'patch', 'install', 'tee', 'mkdir'}
 COPY = {'cp', 'mv', 'rsync', 'ditto'}
 GIT_MUTATE = {'checkout', 'restore', 'reset', 'apply', 'am', 'stash', 'clean', 'pull', 'merge', 'rebase', 'cherry-pick', 'rm', 'mv', 'switch', 'revert'}
 PKG_MUTATE = {'install', 'i', 'ci', 'uninstall', 'remove', 'update', 'add', 'upgrade'}
@@ -342,6 +347,9 @@ def _load_approvals(root):
 # approval. Keep commas/newlines in the same condition scope so splitting
 # "如果...，批准..." cannot turn a conditional instruction into permission.
 APPROVAL_CONDITION = re.compile(r'如果|若(?!干)|假如|倘若|仅当|只有|除非|前提|条件|满足.{0,20}后|待.{0,20}(?:后|再)|等.{0,20}(?:后|再)')
+# A rule describes who may approve ("用户...批准...后"); a person approving says it directly.
+RULE_SUBJECT = re.compile(r'^(?:由|经|须|需|请|待|等|当|在|若)?\s*用户')
+AFTER_THE_FACT = re.compile(r'后\s*[。；;！!]?$')
 APPROVAL_POST_CONDITION = re.compile(r'^\s*(?:(?:但|不过|且|同时|仅|只)\s*)?(?:前提|条件|必须|须|仅当|只有|除非|如果|若|待|等.{0,20}(?:后|再))')
 
 
@@ -413,7 +421,7 @@ def component_approval_quotes(prompt):
             if not (COMPONENT_WORD.search(clause) and APPROVE_MODIFY.search(clause)):
                 continue
             action = APPROVE_MODIFY.search(clause)
-            if reported_authority(clause, action):
+            if reported_authority(clause, action) or RULE_SUBJECT.search(clause) or AFTER_THE_FACT.search(clause):
                 continue
             matched = True
             prefix = '，'.join(clauses[:index])
@@ -440,10 +448,23 @@ def component_approval_quotes(prompt):
     return quotes
 
 
+def without_injected_rules(root, prompt):
+    """DSH 把排队的 SessionStart 注入和用户消息拼进同一个 prompt：逐行去掉本 Hook 自己注入的规则。"""
+    cfg = load_cfg(root)
+    if cfg is None:
+        return prompt
+    try:
+        injected = {line.strip() for line in (rules_text(cfg, root) + browser_rules(root)).splitlines() if line.strip()}
+    except Exception:  # 规则生成失败时仍有 RULE_SUBJECT / AFTER_THE_FACT 兜底
+        return prompt
+    return '\n'.join(line for line in prompt.splitlines() if line.strip() not in injected)
+
+
 def record_approval(root, payload):
     """只看用户本人发出的消息：明确批准修改组件 → 记录本会话批准；收回 → 删除。返回给 AI 的提示。"""
     prompts = _approval_prompts(payload)
     _debug(root, 'UserPromptSubmit', payload, any(p.strip() for p in prompts))
+    prompts = [without_injected_rules(root, p) for p in prompts]
     if not any(p.strip() for p in prompts):
         return ''
     sid, data = _session(payload), _load_approvals(root)
@@ -491,17 +512,53 @@ def _locked(rel, include_switch=True):
     return any(rel == l.rstrip('/') or (l.endswith('/') and rel.startswith(l)) for l in LOCKED)
 
 
+def _without_redirects(toks):
+    """去掉重定向词，免得 `ln a b 2>/dev/null` 的“最后一个参数”变成重定向；重定向目标由 REDIRECT 单独判断。"""
+    kept, skip_next = [], False
+    for tok in toks:
+        if skip_next:
+            skip_next = False
+            continue
+        found = REDIRECT_TOKEN.search(tok)
+        if not found:
+            kept.append(tok)
+            continue
+        if found.start():
+            kept.append(tok[:found.start()])
+        skip_next = bool(BARE_REDIRECT.fullmatch(tok[found.start():]))
+    return kept
+
+
+def _link_location(args):
+    """`ln` 只写链接位置：-t 指定的目录，否则是最后一个参数；只给来源时落在当前目录。"""
+    sources = []
+    for i, arg in enumerate(args):
+        target_dir = LN_TARGET_DIR.fullmatch(arg)
+        if target_dir:
+            return target_dir.group(1) or (args[i + 1] if i + 1 < len(args) else None)
+        if not arg.startswith('-'):
+            sources.append(arg)
+    if len(sources) > 1:
+        return sources[-1]
+    return Path(sources[0]).name if sources else None
+
+
 def _shell_targets(root, cwd, cmd):
     """粗略解析 shell 命令里会被改写的路径（相对路径按 cd 后的目录解析）。"""
-    out = []
+    out, assigned = [], {}
     if '*** Begin Patch' in cmd:
         out += [_rel(root, cwd, t) for t in PATCH_TARGET.findall(cmd)]
+    cmd = blank_data_redirects(cmd, anchors=LOCKED + (SWITCH, APPROVALS))
     for seg in SEGMENT.split(cmd):
-        out += [_rel(root, cwd, t) for t in REDIRECT.findall(seg) if t not in ('/dev/null',)]
+        out += [_rel(root, cwd, expand_vars(t.strip('\'"'), assigned)) for op, t in REDIRECT.findall(seg)
+                if t != '/dev/null' and not ('&' in op and DESCRIPTOR.fullmatch(t))]
         try:
             toks = shlex.split(seg)
         except ValueError:
             toks = seg.split()
+        toks = [expand_vars(t, assigned) for t in toks]
+        note_assignments(toks, assigned)
+        toks = _without_redirects(toks)
         while toks and (re.match(r'^\w+=', toks[0]) or toks[0] in ('sudo', 'env', 'command', 'xargs')):
             toks = toks[1:]
         if not toks:
@@ -514,6 +571,10 @@ def _shell_targets(root, cwd, cmd):
             if name in ('sed', 'perl') and not any(a.startswith('-i') or a.startswith('-pi') for a in args):
                 continue
             out += [_rel(root, cwd, a) for a in plain]
+        elif name == 'ln':
+            location = _link_location(args)
+            if location:
+                out.append(_rel(root, cwd, location))
         elif name in COPY and plain:
             out.append(_rel(root, cwd, plain[-1]))
             if name == 'mv':
