@@ -875,5 +875,124 @@
     }
    ]
   }
- }
+ },
+ {
+  "name": "var-outside-from-registered-dir",
+  "allow": true,
+  "cwd": "{{ROOT}}/company",
+  "tool": "Bash",
+  "args": {
+   "command": "SP=/private/tmp/outside; echo hi > \"$SP/out\""
+  }
+ },
+ {
+  "name": "var-assigned-registered-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "P=book.xlsx; echo hi > \"$P\""
+  }
+ },
+ {
+  "name": "var-unset-in-registered-dir",
+  "allow": false,
+  "cwd": "{{ROOT}}/company",
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi > \"$SP_NOT_SET_ANYWHERE/out\""
+  }
+ },
+ {
+  "name": "heredoc-comparison-bait",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 - <<'EOF'\nfor i in range(3):\n    if i>=0: print(i)\nEOF"
+  }
+ },
+ {
+  "name": "heredoc-redirect-to-book",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "python3 - <<'EOF'\necho hi > book.xlsx\nEOF"
+  }
+ },
+ {
+  "name": "redirect-both-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi &> data/main.json"
+  }
+ },
+ {
+  "name": "redirect-both-append-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi &>> data/main.json"
+  }
+ },
+ {
+  "name": "redirect-clobber-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi >| data/main.json"
+  }
+ },
+ {
+  "name": "redirect-dup-form-to-json",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "echo hi >& data/main.json"
+  }
+ },
+ {
+  "name": "redirect-clobber-in-bash-c",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "bash -c 'echo hi >| data/main.json'"
+  }
+ },
+ {
+  "name": "copy-target-before-null-redirect",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cp other/note data/main.json 2>/dev/null"
+  }
+ },
+ {
+  "name": "copy-target-before-descriptor-redirect",
+  "allow": false,
+  "tool": "Bash",
+  "args": {
+   "command": "cp other/note data/main.json 2>&1"
+  }
+ },
+ {
+  "name": "descriptor-redirect-outside-registered",
+  "allow": true,
+  "tool": "Bash",
+  "args": {
+   "command": "ls other >&2; ls other 2>&1; ls other 2>&-; ls other &>/dev/null; ls other >|/dev/null"
+  }
+ },
+  {"name": "profile-editor-write", "tool": "Edit", "args": {"file_path": "{{ROOT}}/产品管理/网申个人信息主档.json", "old_string": "PDF", "new_string": "Word"}, "allow": false},
+  {"name": "profile-shell-write", "tool": "Bash", "args": {"command": "printf '{}' > 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-read", "tool": "read_file", "args": {"path": "{{ROOT}}/产品管理/网申个人信息主档.json"}, "allow": true},
+  {"name": "profile-unrelated-json", "tool": "write_file", "args": {"path": "{{ROOT}}/other/profile.json", "content": "{}"}, "allow": true},
+  {"name": "profile-copy-overwrite", "tool": "Bash", "args": {"command": "cp /tmp/input.json 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-delete-parent", "tool": "Bash", "args": {"command": "rm -r 产品管理"}, "allow": false},
+  {"name": "profile-custom-location", "config": {"profileFile": "private/candidate.json"}, "tool": "Edit", "args": {"file_path": "{{ROOT}}/private/candidate.json"}, "allow": false},
+  {"name": "profile-business-fixed-writer", "tool": "Bash", "args": {"command": "node .agents/skills/job-application-assistant-v2/scripts/business-authorization.mjs set --value 1 --quote '用户授权原话' --profile 产品管理/网申个人信息主档.json"}, "allow": true},
+  {"name": "profile-business-writer-with-redirect", "tool": "Bash", "args": {"command": "node .agents/skills/job-application-assistant-v2/scripts/business-authorization.mjs status --profile 产品管理/网申个人信息主档.json > 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-spoofed-writer", "tool": "Bash", "args": {"command": "node /tmp/business-authorization.mjs set --profile 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-inline-write", "tool": "Bash", "args": {"command": "python3 -c \"open('产品管理/网申个人信息主档.json','w').write('{}')\""}, "allow": false},
+  {"name": "profile-git-boundary-unchanged", "tool": "Bash", "args": {"command": "git diff -- 产品管理/网申个人信息主档.json"}, "allow": true},
+  {"name": "profile-mcp-fixed-answers", "tool": "mcp__recruiting_application_v2__profile_record_answers", "args": {"evidence": "用户本轮原话", "answers": []}, "allow": true}
 ]

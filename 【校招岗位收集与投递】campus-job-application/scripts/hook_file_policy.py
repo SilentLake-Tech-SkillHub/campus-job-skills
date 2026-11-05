@@ -6,6 +6,7 @@ No command, submitted program, workbook or user document is executed/read here.
 import ast
 from dataclasses import dataclass
 import json
+import os
 import re
 import shlex
 from pathlib import Path
@@ -223,6 +224,159 @@ def _inline(program, language, cwd):
     return out
 
 
+SHELL_VAR = re.compile(r'\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))')
+
+
+def expand_vars(text, assigned):
+    """Expand variables this command assigned or the environment defines.
+
+    One unknown variable leaves the text as written, so callers keep judging it
+    the way they judged an unresolved path before.
+    """
+    missing = False
+    def value(match):
+        nonlocal missing
+        name = match.group(1) or match.group(2)
+        found = assigned[name] if name in assigned else os.environ.get(name)
+        if not found:
+            missing = True
+            return match.group(0)
+        return found
+    expanded = SHELL_VAR.sub(value, text)
+    return text if missing else expanded
+
+
+def note_assignments(words, assigned):
+    """A segment of bare assignments lasts for the rest of the command; `X=1 cmd` does not."""
+    words = words[1:] if words[:1] == ['export'] else words
+    if words and all(re.match(r'^[A-Za-z_]\w*=', w) for w in words):
+        for word in words:
+            name, raw = word.split('=', 1)
+            value = expand_vars(raw, assigned)
+            # A computed value ($(...), an unknown variable) stays unknown and hides any same-named env value.
+            assigned[name] = '' if '$' in value or '`' in value else value
+
+
+HEREDOC = re.compile(r"""<<(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([^\s;&|<>()'"]+))""")
+SHELL_SINK = re.compile(r'(?:^|[;&|(]\s*|\bsudo\s+|\benv\s+)(?:ba|z)?sh\b')
+RUNS_TEXT = re.compile(r'\b(?:sh|bash|zsh)\s+-\w*c\b|\beval\b|\bawk\b|system\(|popen|subprocess|\bexec(?:Sync)?\(|\bspawn')
+REDIRECT_OP = re.compile(r'>{1,2}')
+DATA_TARGET = re.compile(r'[|&]?[ \t]*([^\s;&|]*)')  # `>|` and `>&` still name a target
+WRITE_REDIRECTS = {'>', '>>', '>|', '&>', '&>>', '>&'}
+# shlex drops quotes, so `grep '>|' f` would otherwise lex like a real redirect.
+QUOTED_OPERATOR = re.compile(r"""(?<![^\s;&|(])(['"])(?:&>>?|>>?|>\||>&)\1(?![^\s;&|)])""")
+
+
+def _closing_paren(text, opening):
+    depth, i = 0, opening
+    while i < len(text):
+        if text[i] == '(': depth += 1
+        elif text[i] == ')':
+            depth -= 1
+            if depth == 0: return i
+        i += 1
+    return None
+
+
+def shell_data_spans(command, base=0):
+    """Where the shell passes text along instead of running it: (start, end, kind).
+
+    Kinds: quote, heredoc, comment, compare. Returns None when the command does
+    not parse, so callers fall back to treating all of it as code.
+    """
+    spans, pending, i, n = [], [], 0, len(command)
+    while i < n:
+        ch = command[i]
+        at_word = i == 0 or command[i - 1] in ' \t\n;&|('
+        if ch == '\\':
+            i += 2
+        elif ch == "'":
+            end = command.find("'", i + 1)
+            if end < 0: return None
+            spans.append((base + i, base + end, 'quote')); i = end + 1
+        elif ch == '"':
+            start, j = i, i + 1
+            while j < n and command[j] != '"':
+                if command[j] == '\\':
+                    j += 2
+                elif command.startswith('$(', j) and not command.startswith('$((', j):
+                    end = _closing_paren(command, j + 1)
+                    inner = None if end is None else shell_data_spans(command[j + 2:end], base + j + 2)
+                    if inner is None: return None
+                    spans.append((base + start, base + j, 'quote')); spans += inner
+                    start = j = end + 1
+                else:
+                    j += 1
+            if j >= n: return None
+            spans.append((base + start, base + j, 'quote')); i = j + 1
+        elif ch == '#' and at_word:
+            end = command.find('\n', i)
+            end = n if end < 0 else end
+            spans.append((base + i, base + end, 'comment')); i = end
+        elif command.startswith('((', i) or command.startswith('[[', i) and at_word:
+            end = command.find('))' if ch == '(' else ']]', i + 2)
+            if end >= 0:
+                spans.append((base + i, base + end, 'compare')); i = end + 2
+            else:
+                i += 2
+        elif command.startswith('<<', i) and not command.startswith('<<<', i) and (m := HEREDOC.match(command, i)):
+            line_start = command.rfind('\n', 0, i) + 1
+            line_end = command.find('\n', i)
+            line = command[line_start:n if line_end < 0 else line_end]
+            pending.append((m.group(2) or m.group(3) or m.group(4), bool(m.group(1)), bool(SHELL_SINK.search(line))))
+            i = m.end()
+        elif ch == '\n' and pending:
+            i += 1
+            for delimiter, dashed, runs_as_shell in pending:
+                start = i
+                while i < n:
+                    end = command.find('\n', i)
+                    end = n if end < 0 else end
+                    line = command[i:end]
+                    if (line.lstrip('\t') if dashed else line) == delimiter:
+                        break
+                    i = end + 1
+                if not runs_as_shell:
+                    spans.append((base + start, base + min(i, n), 'heredoc'))
+                end = command.find('\n', i)
+                i = n if end < 0 else end + 1
+            pending = []
+        else:
+            i += 1
+    return spans
+
+
+def blank_data_redirects(command, anchors=None, kinds=None):
+    """Blank each `>` in data that cannot be a redirect, so `i>=0` and `a > b` stop reading as writes.
+
+    Text in data can still reach a shell (`os.system('echo > x')`), so a `>` stays
+    when its target is a named path. With `anchors`, a relative target must also
+    name one of them or the command must contain something that runs text.
+    """
+    spans = shell_data_spans(command)
+    if not spans:
+        return command
+    chars, runs_text = list(command), bool(RUNS_TEXT.search(command))
+    def stays(op, end):
+        before = command[op.start() - 1] if op.start() else ''
+        target = DATA_TARGET.match(command, op.end(), end).group(1)
+        bare = target.strip('\'"\\)]},(:')
+        if command[op.end():op.end() + 1] == '=' or before in ('=', '-', '<') or not bare:
+            return False
+        pathlike = '/' in bare or bool(re.search(r'\.[A-Za-z]\w*$', bare))
+        if anchors is None:
+            return pathlike
+        if any(a.rstrip('/') in bare for a in anchors) or bare[0] in '/~' or bare[0] == '$' and '/' in bare:
+            return True
+        return runs_text and (pathlike or target.lstrip('\\')[:1] in ("'", '"'))
+    for start, end, kind in spans:
+        if kinds is None or kind in kinds:
+            for op in REDIRECT_OP.finditer(command, start, end):
+                if not stays(op, end):
+                    chars[op.start():op.end()] = ' ' * (op.end() - op.start())
+    return ''.join(chars)
+
+
 def _subcommands(command):
     """Observe executable substitutions, ignoring text inside single quotes."""
     out, i, quote = [], 0, None
@@ -293,6 +447,7 @@ def _read_operands(name, args):
 
 def shell_effects(command, cwd, root, registered=(), sync_script=None):
     out = []
+    command = QUOTED_OPERATOR.sub('_', blank_data_redirects(command, kinds={'heredoc'}))
     for sub in _subcommands(command): out.extend(shell_effects(sub, cwd, root, registered, sync_script))
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=';&|<>\n')
@@ -308,13 +463,20 @@ def shell_effects(command, cwd, root, registered=(), sync_script=None):
             part = []
         else: part.append(tok)
     if part: segments.append(part)
+    assigned = {}
     for segment in segments:
+        segment = [expand_vars(tok, assigned) for tok in segment]
+        note_assignments(segment, assigned)
         clean, i = [], 0
         while i < len(segment):
             tok = segment[i]
-            if tok in {'>', '>>', '<', '<<'} and i + 1 < len(segment):
+            if (tok in WRITE_REDIRECTS or tok in {'<', '<<'}) and i + 1 < len(segment):
                 value = segment[i + 1]
-                if tok != '<<' and value not in {'&', '/dev/null'} and not value.isdigit():
+                # The lexer splits `2>x` into `2`, `>`, `x`; left in place, `2` would
+                # read as the last argument and hide the real target of `cp a b 2>x`.
+                if clean and clean[-1].isdigit(): clean.pop()
+                closes_descriptor = tok == '>&' and value == '-'
+                if tok != '<<' and value not in {'&', '/dev/null'} and not value.isdigit() and not closes_descriptor:
                     p = path_at(value, cwd)
                     if p is not None: out.append(Effect('read' if tok == '<' else 'write', p))
                 i += 2
@@ -357,6 +519,11 @@ def shell_effects(command, cwd, root, registered=(), sync_script=None):
                 continue
             script = next((a for a in args if not a.startswith('-')), None)
             if re.fullmatch(r'python(?:\d+(?:\.\d+)*)?', name) and script and sync_script and path_at(script, cwd) == Path(sync_script).resolve():
+                continue
+            # The component owns this fixed profile writer. An identically named
+            # external script is not trusted. Redirections were inspected above.
+            profile_writer = Path(root) / '.agents/skills/job-application-assistant-v2/scripts/business-authorization.mjs'
+            if name == 'node' and script and path_at(script, cwd) == profile_writer.resolve():
                 continue
             for arg in plain[1:]:
                 p = path_at(arg, cwd)

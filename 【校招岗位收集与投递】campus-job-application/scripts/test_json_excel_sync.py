@@ -480,8 +480,8 @@ class SyncTests(unittest.TestCase):
         self.assertEqual([(e['code'], e['field'], e['value']) for e in ledger['value_confirmations']],
                          [(code0, '岗位链接', 'https://a.example/0-new')])
 
-    def test_relink_rejects_bad_input_and_moves_to_new_domain_site(self):
-        """新链接与同公司其它岗位重复、非 https、公司行都拒绝；新域名 = 新站点，原投递链接随旧站点清空。"""
+    def test_relink_rejects_bad_input_and_does_not_create_second_application_site(self):
+        """拒绝重复、非 HTTPS、公司行和未经核对的新域名，保留现有站点与投递链接。"""
         self.migrate()
         self.run_cmd('write')
         for item, msg in ((self.relink_item(0, 'https://a.example/1'), '同公司其它岗位使用'),
@@ -489,12 +489,16 @@ class SyncTests(unittest.TestCase):
                           ({"sheet": "中国大陆", "code": "C00002", "new_link": "https://b.example/1"}, '公司行')):
             self.assertIn(msg, self.run_cmd('relink', '--input', self.items([item]), '--preview', ok=False).stderr)
         self.run_cmd('set-apply-link', '--input', self.items([{"code": self.code(1), "投递链接": "https://a.example/apply/1"}]), '--quote', '记下申请页')
-        self.run_cmd('relink', '--input', self.items([self.relink_item(1, 'https://jobs.a-new.example/1')]), '--quote', '官网换系统了')
+        baseline = self.master()
+        for command in (['--preview'], ['--quote', '官网换系统了']):
+            refused = self.run_cmd('relink', '--input', self.items([self.relink_item(1, 'https://jobs.a-new.example/1')]), *command, ok=False)
+            self.assertIn('不能自动新建站点', refused.stderr)
         master = self.master()
+        self.assertEqual(master, baseline)
         sites = M.sites(master)
         row = next(r for r in master['sheets'][0]['rows'] if r['row'] == 4)
-        self.assertEqual((S.cell_value(row, 13), S.cell_value(row, 14), S.cell_value(row, 15)), ('J000002', 'S0002', None))
-        self.assertEqual(sites['S0002']['站点'], 'https://jobs.a-new.example')
+        self.assertEqual((S.cell_value(row, 13), S.cell_value(row, 14), S.cell_value(row, 15)), ('J000002', 'S0001', 'https://a.example/apply/1'))
+        self.assertEqual(sites['S0001']['站点'], 'https://a.example')
         self.run_cmd('write')
 
     def test_http_only_official_site_gets_a_site_code_as_recorded(self):

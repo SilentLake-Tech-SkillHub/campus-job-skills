@@ -9,6 +9,10 @@ stdin 为宿主 Hook payload。
 - 对话结束（Stop）：存在未写入且用户未选择延后的改动时阻止结束，要求询问“现在写入还是下一轮写入”。
 """
 import argparse
+import contextlib
+import hashlib
+import tempfile
+import time
 import json
 import os
 import re
@@ -20,7 +24,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_payload import (call_parts, _session, PROMPT_KEYS, _prompt, QUESTION_REPLY_TAG, QUESTION_REPLY,
                           QUESTION_CALL_ID, _approval_prompts)
-from hook_file_policy import file_effects, path_at, touches, mentioned, text_only, PATH_KEYS
+from hook_file_policy import (file_effects, path_at, touches, mentioned, text_only, PATH_KEYS,
+                              blank_data_redirects, expand_vars, note_assignments)
 
 SCRIPT = Path(__file__).with_name('json_excel_sync.py')
 EDIT_TOOL = re.compile(r'(write|edit|patch|replace|create|insert|notebook)', re.I)
@@ -70,10 +75,11 @@ def label_groups(root, cfg):
 
 def protected(cfg):
     base = (cfg.get('companyStore') or {}).get('dir', '岗位交接/公司')
+    profile = os.environ.get('RECRUITING_PROFILE_JSON') or cfg.get('profileFile', '产品管理/网申个人信息主档.json')
     # 公司宽表文件只由 company_store.py 生成；投递回传只由投递组件写入、company_store.py 消费
     return [cfg['workbook'], cfg['masterData'], cfg['confirmationLedger'], LABELS_FILE, *cfg.get('labelGroups', []),
             base + '/', str(Path(base).with_name('投递回传.json')), '产品管理/user_applicaiton_requirements_temp.json',
-            '.runtime/user_application_requirements_state.json']
+            '.runtime/user_application_requirements_state.json', profile]
 
 
 def sync(root, *args):
@@ -302,9 +308,13 @@ APPROVE_MODIFY = re.compile(r'(批准|授权|同意|允许).{0,6}(修改|改|维
 CONDITIONAL = re.compile(r'情况下|的话|前提|时才|之后才|需要.{0,4}(批准|授权)|是否')
 NEGATED = re.compile(r'(不|别|禁止|不要|不准|不许)\s*(批准|授权|同意|允许|修改|改|维护)')
 REVOKE = re.compile(r'(收回|撤销|撤回|取消|结束)\s*(组件)?\s*(维护)?\s*(授权|批准|维护)|锁上组件|锁回组件|恢复只读')
-SEGMENT = re.compile(r'&&|\|\||;|\n|\|')
-REDIRECT = re.compile(r'(?:^|[^0-9&>])>{1,2}\s*([^\s&;|>][^\s;&|]*)')
-IN_PLACE = {'sed', 'perl', 'truncate', 'touch', 'chmod', 'chown', 'rm', 'rmdir', 'unlink', 'patch', 'ln', 'install', 'tee', 'mkdir'}
+SEGMENT = re.compile(r'&&|\|\||;|\n|(?<!>)\|')  # `>|` 是重定向，不是管道
+REDIRECT = re.compile(r'(?<!>)>{1,2}(\|?&?)\s*([^\s&;|>][^\s;&|]*)')  # 含 1> 2> &> >| >&
+DESCRIPTOR = re.compile(r'\d+-?|-')  # `>&` 后面是这些时只是复制或关闭描述符，不写文件
+REDIRECT_TOKEN = re.compile(r'(?:\d+|&)?>')
+BARE_REDIRECT = re.compile(r'(?:\d*|&)>{1,2}\|?&?')  # 整个词就是操作符，目标在下一个词
+LN_TARGET_DIR = re.compile(r'(?:--t[a-z-]*=?|-[bdFfiLnPrsTv]*t)(.*)')
+IN_PLACE = {'sed', 'perl', 'truncate', 'touch', 'chmod', 'chown', 'rm', 'rmdir', 'unlink', 'patch', 'install', 'tee', 'mkdir'}
 COPY = {'cp', 'mv', 'rsync', 'ditto'}
 GIT_MUTATE = {'checkout', 'restore', 'reset', 'apply', 'am', 'stash', 'clean', 'pull', 'merge', 'rebase', 'cherry-pick', 'rm', 'mv', 'switch', 'revert'}
 PKG_MUTATE = {'install', 'i', 'ci', 'uninstall', 'remove', 'update', 'add', 'upgrade'}
@@ -318,13 +328,16 @@ def maintenance_on(root):
         return False
 
 
-def _debug(root, event, payload, found):
+def _debug(root, event, payload, found, **details):
     """只记字段名和是否取到原话，不记内容；排查宿主 payload 用，覆盖写。"""
     try:
         f = root / '.runtime/组件软锁诊断.json'
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps({'event': event, 'keys': sorted(payload)[:40], 'session': _session(payload),
-                                 'promptFound': found, 'at': __import__('time').strftime('%Y-%m-%d %H:%M:%S')},
+                                 'workspace': str(Path(root).resolve()), 'source': str(Path(__file__).resolve()),
+                                 'approvalPath': str((root / APPROVALS).resolve()),
+                                 'promptFound': found, 'at': __import__('time').strftime('%Y-%m-%d %H:%M:%S'),
+                                 **details},
                                 ensure_ascii=False, indent=2), encoding='utf-8')
     except OSError:
         pass
@@ -342,6 +355,9 @@ def _load_approvals(root):
 # approval. Keep commas/newlines in the same condition scope so splitting
 # "如果...，批准..." cannot turn a conditional instruction into permission.
 APPROVAL_CONDITION = re.compile(r'如果|若(?!干)|假如|倘若|仅当|只有|除非|前提|条件|满足.{0,20}后|待.{0,20}(?:后|再)|等.{0,20}(?:后|再)')
+# A rule describes who may approve ("用户...批准...后"); a person approving says it directly.
+RULE_SUBJECT = re.compile(r'^(?:由|经|须|需|请|待|等|当|在|若)?\s*用户')
+AFTER_THE_FACT = re.compile(r'后\s*[。；;！!]?$')
 APPROVAL_POST_CONDITION = re.compile(r'^\s*(?:(?:但|不过|且|同时|仅|只)\s*)?(?:前提|条件|必须|须|仅当|只有|除非|如果|若|待|等.{0,20}(?:后|再))')
 
 
@@ -413,7 +429,7 @@ def component_approval_quotes(prompt):
             if not (COMPONENT_WORD.search(clause) and APPROVE_MODIFY.search(clause)):
                 continue
             action = APPROVE_MODIFY.search(clause)
-            if reported_authority(clause, action):
+            if reported_authority(clause, action) or RULE_SUBJECT.search(clause) or AFTER_THE_FACT.search(clause):
                 continue
             matched = True
             prefix = '，'.join(clauses[:index])
@@ -440,35 +456,107 @@ def component_approval_quotes(prompt):
     return quotes
 
 
+def without_injected_rules(root, prompt):
+    """DSH 把排队的 SessionStart 注入和用户消息拼进同一个 prompt：逐行去掉本 Hook 自己注入的规则。"""
+    cfg = load_cfg(root)
+    if cfg is None:
+        return prompt
+    try:
+        injected = {line.strip() for line in (rules_text(cfg, root) + browser_rules(root)).splitlines() if line.strip()}
+    except Exception:  # 规则生成失败时仍有 RULE_SUBJECT / AFTER_THE_FACT 兜底
+        return prompt
+    return '\n'.join(line for line in prompt.splitlines() if line.strip() not in injected)
+
+
+@contextlib.contextmanager
+def _approval_lock(root):
+    """Serialize the complete read/change/replace across every host process."""
+    directory = root / '.runtime'
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / '.组件维护批准.lock').open('a+b') as file:
+        try:
+            import fcntl
+            operation = lambda unlock=False: fcntl.flock(file, fcntl.LOCK_UN if unlock else fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except ImportError:
+            import msvcrt
+            if file.seek(0, 2) == 0:
+                file.write(b'\0'); file.flush()
+            def operation(unlock=False):
+                file.seek(0)
+                msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK if unlock else msvcrt.LK_NBLCK, 1)
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                operation()
+                break
+            except OSError as error:
+                if error.errno not in (11, 13, 35) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(.02)
+        try:
+            yield
+        finally:
+            operation(True)
+
+
+def _save_approvals(root, data):
+    """Publish one complete file, then verify those bytes before reporting success."""
+    target = root / APPROVALS
+    body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+    descriptor, temporary = tempfile.mkstemp(prefix='.组件维护批准.', suffix='.tmp', dir=target.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(body); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        saved = target.read_bytes()
+        if saved != body:
+            raise OSError('批准记录写入后读回不一致')
+        return hashlib.sha256(saved).hexdigest()
+    finally:
+        try:
+            Path(temporary).unlink()
+        except FileNotFoundError:
+            pass
+
+
 def record_approval(root, payload):
-    """只看用户本人发出的消息：明确批准修改组件 → 记录本会话批准；收回 → 删除。返回给 AI 的提示。"""
+    """Only the host's user event may persist approval; ordinary reads never renew it."""
     prompts = _approval_prompts(payload)
     _debug(root, 'UserPromptSubmit', payload, any(p.strip() for p in prompts))
+    prompts = [without_injected_rules(root, p) for p in prompts]
     if not any(p.strip() for p in prompts):
         return ''
-    sid, data = _session(payload), _load_approvals(root)
-    now = __import__('time').time()
-    data = {k: v for k, v in data.items() if v.get('expiresAt', 0) > now}
-    note = ''
+    sid = _session(payload)
     approval_quotes = [quote for prompt in prompts for quote in component_approval_quotes(prompt)]
-    if any(direct_revocation(p) for p in prompts):
-        data.pop(sid, None)
-        note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'
-    elif approval_quotes:
-        hours = 2 if sid == '_no_session' else APPROVAL_HOURS
-        data[sid] = {'userQuote': '\n'.join(approval_quotes)[:300], 'approvedAt': now, 'expiresAt': now + hours * 3600}
-        note = f'\n【组件软锁】已记录用户批准：本会话可以修改搜索组件、投递组件和 Hook 配置（{hours} 小时内有效，用户说“收回授权”即失效）。修改仍须按用户的具体要求进行，并逐项汇报。'
-    else:
-        return '\n【组件软锁】本会话已获用户批准修改组件。' if sid in data else ''
-    f = root / APPROVALS
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-    return note
+    revoked = any(direct_revocation(p) for p in prompts)
+    if not revoked and not approval_quotes:
+        return '\n【组件软锁】本会话已获用户批准修改组件。' if approved(root, payload) else ''
+    try:
+        with _approval_lock(root):
+            now = time.time()
+            data = {k: v for k, v in _load_approvals(root).items() if v.get('expiresAt', 0) > now}
+            if revoked:
+                data.pop(sid, None)
+                note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'
+            else:
+                hours = 2 if sid == '_no_session' else APPROVAL_HOURS
+                data[sid] = {'userQuote': '\n'.join(approval_quotes)[:300], 'approvedAt': now, 'expiresAt': now + hours * 3600}
+                note = f'\n【组件软锁】已记录用户批准：本会话可以修改搜索组件、投递组件和 Hook 配置（{hours} 小时内有效，用户说“收回授权”即失效）。修改仍须按用户的具体要求进行，并逐项汇报。'
+            digest = _save_approvals(root, data)
+            _debug(root, 'UserPromptSubmit', payload, True, operation='revoke' if revoked else 'approve',
+                   saved=True, approvalSha256=digest, sessionRecorded=sid in data)
+        return note + f'\n【批准保存核对】会话 {sid}；文件 {root / APPROVALS}；读回 SHA256 {digest}。'
+    except OSError as error:
+        _debug(root, 'UserPromptSubmit', payload, True, saved=False, error=str(error))
+        return f'\n【组件软锁】批准记录保存失败，未确认生效：{error}。目标文件：{root / APPROVALS}。'
 
 
 def approved(root, payload):
     v = _load_approvals(root).get(_session(payload))
-    return bool(v) and v.get('expiresAt', 0) > __import__('time').time()
+    allowed = bool(v) and v.get('expiresAt', 0) > time.time()
+    _debug(root, payload.get('hook_event_name') or 'PreToolUse', payload, False,
+           operation='check', authorizationSource='conversation_record', sessionRecorded=bool(v), approved=bool(allowed))
+    return allowed
 
 
 def _rel(root, cwd, t):
@@ -491,17 +579,53 @@ def _locked(rel, include_switch=True):
     return any(rel == l.rstrip('/') or (l.endswith('/') and rel.startswith(l)) for l in LOCKED)
 
 
+def _without_redirects(toks):
+    """去掉重定向词，免得 `ln a b 2>/dev/null` 的“最后一个参数”变成重定向；重定向目标由 REDIRECT 单独判断。"""
+    kept, skip_next = [], False
+    for tok in toks:
+        if skip_next:
+            skip_next = False
+            continue
+        found = REDIRECT_TOKEN.search(tok)
+        if not found:
+            kept.append(tok)
+            continue
+        if found.start():
+            kept.append(tok[:found.start()])
+        skip_next = bool(BARE_REDIRECT.fullmatch(tok[found.start():]))
+    return kept
+
+
+def _link_location(args):
+    """`ln` 只写链接位置：-t 指定的目录，否则是最后一个参数；只给来源时落在当前目录。"""
+    sources = []
+    for i, arg in enumerate(args):
+        target_dir = LN_TARGET_DIR.fullmatch(arg)
+        if target_dir:
+            return target_dir.group(1) or (args[i + 1] if i + 1 < len(args) else None)
+        if not arg.startswith('-'):
+            sources.append(arg)
+    if len(sources) > 1:
+        return sources[-1]
+    return Path(sources[0]).name if sources else None
+
+
 def _shell_targets(root, cwd, cmd):
     """粗略解析 shell 命令里会被改写的路径（相对路径按 cd 后的目录解析）。"""
-    out = []
+    out, assigned = [], {}
     if '*** Begin Patch' in cmd:
         out += [_rel(root, cwd, t) for t in PATCH_TARGET.findall(cmd)]
+    cmd = blank_data_redirects(cmd, anchors=LOCKED + (SWITCH, APPROVALS))
     for seg in SEGMENT.split(cmd):
-        out += [_rel(root, cwd, t) for t in REDIRECT.findall(seg) if t not in ('/dev/null',)]
+        out += [_rel(root, cwd, expand_vars(t.strip('\'"'), assigned)) for op, t in REDIRECT.findall(seg)
+                if t != '/dev/null' and not ('&' in op and DESCRIPTOR.fullmatch(t))]
         try:
             toks = shlex.split(seg)
         except ValueError:
             toks = seg.split()
+        toks = [expand_vars(t, assigned) for t in toks]
+        note_assignments(toks, assigned)
+        toks = _without_redirects(toks)
         while toks and (re.match(r'^\w+=', toks[0]) or toks[0] in ('sudo', 'env', 'command', 'xargs')):
             toks = toks[1:]
         if not toks:
@@ -514,6 +638,10 @@ def _shell_targets(root, cwd, cmd):
             if name in ('sed', 'perl') and not any(a.startswith('-i') or a.startswith('-pi') for a in args):
                 continue
             out += [_rel(root, cwd, a) for a in plain]
+        elif name == 'ln':
+            location = _link_location(args)
+            if location:
+                out.append(_rel(root, cwd, location))
         elif name in COPY and plain:
             out.append(_rel(root, cwd, plain[-1]))
             if name == 'mv':
@@ -553,7 +681,11 @@ def component_violation(root, payload):
         return f'组件维护开关 {SWITCH} 只能由用户本人修改，AI 不得写入。'
     if any(t == APPROVALS for t in targets):
         return f'组件维护批准记录 {APPROVALS} 只由 Hook 根据用户本人的消息写入，AI 不得写入。'
-    if maintenance_on(root) or approved(root, payload):
+    if maintenance_on(root):
+        _debug(root, payload.get('hook_event_name') or 'PreToolUse', payload, False,
+               operation='check', authorizationSource='user_maintenance_switch', approved=True)
+        return None
+    if approved(root, payload):
         return None
     bad = sorted({t for t in targets if _locked(t, include_switch=False)})
     if not bad:

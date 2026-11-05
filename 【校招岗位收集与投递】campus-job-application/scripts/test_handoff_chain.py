@@ -47,13 +47,13 @@ for (const [title, event, result] of JSON.parse(process.env.PLAN)) {
   const r = c.roles.find(x => x.title === title);
   const shot = path.join(process.env.EVIDENCE_DIR, r.roleId + '.png');
   await writeFile(shot, 'png-' + r.roleId);
-  const ev = {schemaVersion: 1, event, batchId: input.batchId, companyId: r.siteId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
+  const ev = {schemaVersion: 1, event, batchId: input.batchId, companyId: c.companyId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
     observedAt: new Date(Date.now() - 1000).toISOString(), sourceUrl: r.url, result, reviewer: 'test',
     artifacts: [{file: shot, sha256: sha(await readFile(shot))}]};
   const evFile = path.join(process.env.EVIDENCE_DIR, r.roleId + '.json');
   await writeFile(evFile, JSON.stringify(ev));
   results.push(await closeApplication({outcome: {schemaVersion: 1, eventId: randomUUID(), event, batchId: input.batchId,
-    companyId: r.siteId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
+    companyId: c.companyId, roleId: r.roleId, roleUrl: r.url, roleTitle: r.title,
     evidence: {file: evFile, sha256: sha(await readFile(evFile))}}}));
 }
 console.log(JSON.stringify({input, results}));
