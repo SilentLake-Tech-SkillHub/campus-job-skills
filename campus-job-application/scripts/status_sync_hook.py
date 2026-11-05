@@ -329,16 +329,26 @@ def maintenance_on(root):
 
 
 def _debug(root, event, payload, found, **details):
-    """只记字段名和是否取到原话，不记内容；排查宿主 payload 用，覆盖写。"""
+    """Keep the latest approval write and permission check in one diagnostic."""
+    target = root / '.runtime/组件软锁诊断.json'
+    record = {
+        'event': event, 'keys': sorted(payload)[:40], 'session': _session(payload),
+        'workspace': str(Path(root).resolve()), 'source': str(Path(__file__).resolve()),
+        'approvalPath': str((root / APPROVALS).resolve()), 'promptFound': found,
+        'at': time.strftime('%Y-%m-%d %H:%M:%S'), **details,
+    }
     try:
-        f = root / '.runtime/组件软锁诊断.json'
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({'event': event, 'keys': sorted(payload)[:40], 'session': _session(payload),
-                                 'workspace': str(Path(root).resolve()), 'source': str(Path(__file__).resolve()),
-                                 'approvalPath': str((root / APPROVALS).resolve()),
-                                 'promptFound': found, 'at': __import__('time').strftime('%Y-%m-%d %H:%M:%S'),
-                                 **details},
-                                ensure_ascii=False, indent=2), encoding='utf-8')
+        with _approval_lock(root, name='.组件软锁诊断.lock'):
+            try:
+                previous = json.loads(target.read_text(encoding='utf-8'))
+                if not isinstance(previous, dict):
+                    previous = {}
+            except (OSError, ValueError):
+                previous = {}
+            latest_approval = record if 'saved' in details else previous.get('lastApproval')
+            latest_check = record if details.get('operation') == 'check' else previous.get('lastCheck')
+            body = {**record, 'lastApproval': latest_approval, 'lastCheck': latest_check}
+            _replace_json(target, body)
     except OSError:
         pass
 
@@ -469,11 +479,11 @@ def without_injected_rules(root, prompt):
 
 
 @contextlib.contextmanager
-def _approval_lock(root):
+def _approval_lock(root, name='.组件维护批准.lock'):
     """Serialize the complete read/change/replace across every host process."""
     directory = root / '.runtime'
     directory.mkdir(parents=True, exist_ok=True)
-    with (directory / '.组件维护批准.lock').open('a+b') as file:
+    with (directory / name).open('a+b') as file:
         try:
             import fcntl
             operation = lambda unlock=False: fcntl.flock(file, fcntl.LOCK_UN if unlock else fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -499,24 +509,28 @@ def _approval_lock(root):
             operation(True)
 
 
+def _replace_json(target, data):
+    body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+    descriptor, temporary = tempfile.mkstemp(prefix=f'.{target.stem}.', suffix='.tmp', dir=target.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        return body
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
 def _save_approvals(root, data):
     """Publish one complete file, then verify those bytes before reporting success."""
     target = root / APPROVALS
-    body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
-    descriptor, temporary = tempfile.mkstemp(prefix='.组件维护批准.', suffix='.tmp', dir=target.parent)
-    try:
-        with os.fdopen(descriptor, 'wb') as stream:
-            stream.write(body); stream.flush(); os.fsync(stream.fileno())
-        os.replace(temporary, target)
-        saved = target.read_bytes()
-        if saved != body:
-            raise OSError('批准记录写入后读回不一致')
-        return hashlib.sha256(saved).hexdigest()
-    finally:
-        try:
-            Path(temporary).unlink()
-        except FileNotFoundError:
-            pass
+    body = _replace_json(target, data)
+    saved = target.read_bytes()
+    if saved != body:
+        raise OSError('批准记录写入后读回不一致')
+    return hashlib.sha256(saved).hexdigest()
 
 
 def record_approval(root, payload):
