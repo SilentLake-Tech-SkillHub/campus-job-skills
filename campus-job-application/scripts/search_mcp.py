@@ -135,14 +135,14 @@ def recruiting_apply_link_confirm(items:list[dict],user_quote:str)->dict:
 
 @server.tool()
 def recruiting_site_links_preview(items:list[dict])->dict:
-    """只读：写入/更换站点登录链接、账号核对页前生成“当前 → 更新”（items：[{code: 站点编码, 登录链接?, 账号核对页?}]）。必须原样展示给用户并取得明确确认。"""
+    """只读：写入/更换站点登录链接、账号核对页前生成“当前 → 更新”（items：[{code: 站点编码, 登录链接?, 账号核对页?, retire_to?: 同公司的保留站点}]）。必须原样展示给用户并取得明确确认。"""
     return run_sync('set-site-links','--preview',items=items)
 
 
 @server.tool()
-def recruiting_site_links_confirm(items:list[dict],user_quote:str)->dict:
+def recruiting_site_links_confirm(items:list[dict],user_quote:str,expected_sha:str|None=None)->dict:
     """用户确认后写入站点链接（登录链接可为空：该站点只能在岗位页登录）；不写 Excel。"""
-    return run_sync('set-site-links','--quote',user_quote,items=items)
+    return run_sync('set-site-links','--quote',user_quote,*(['--expect-sha',expected_sha] if expected_sha else []),items=items)
 
 
 @server.tool()
