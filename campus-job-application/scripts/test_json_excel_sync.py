@@ -55,6 +55,25 @@ class SyncTests(unittest.TestCase):
         self.snapshot()
         self.run_cmd('set-quota-rules', '--input', self.items([self.quota(2)]))
 
+    def test_migrate_login_configs_preserves_workbook_values_and_removes_only_verified_sources(self):
+        base = self.root / '岗位交接/公司/中国大陆/甲公司'
+        base.mkdir(parents=True)
+        legacy = base / '登录.json'
+        source = {'companyId': 'C00001', 'origin': 'https://a.example', 'loginPath': '/login'}
+        legacy.write_text(json.dumps(source), encoding='utf-8')
+        ctx = S.Ctx(self.root, '产品管理/labels.json')
+        before = self.master()
+        preview = S.migrate_login_configs(ctx)
+        self.assertEqual(self.master(), before)
+        with self.assertRaises(SystemExit):
+            S.migrate_login_configs(ctx, 'stale', 'fixture approval')
+        self.assertEqual(S.migrate_login_configs(ctx, preview['preview_sha'], 'fixture approval')['migrated'], 1)
+        self.assertEqual(self.master()['login_configs']['C00001']['S0001'], source)
+        self.assertEqual(self.master()['sheets'], before['sheets'])
+        self.assertEqual(S.migrate_login_configs(ctx, preview['preview_sha'], 'fixture approval', True)['removed_legacy'], 1)
+        self.assertFalse(legacy.exists())
+        self.assertEqual(self.master()['login_configs']['C00001']['S0001'], source)
+
     def snapshot(self):
         """Excel → 主数据快照，并给第一次出现的公司/岗位/站点分配编码（甲公司 C00001、乙公司 C00002，岗位按行序 J000001 起）。"""
         snap = workbook_store.snapshot(self.root / 'book.xlsx')

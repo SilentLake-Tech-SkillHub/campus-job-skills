@@ -1386,6 +1386,69 @@ def _confirm_values(ctx, master, plan, quote, ref):
     save_json(ctx.ledger_path, ledger)
 
 
+def migrate_login_configs(ctx, expected_sha=None, quote=None, remove_legacy=False):
+    """Copy identical legacy configuration into its canonical master slot."""
+    master = ctx.load_master()
+    sites = M.sites(master)
+    configs = copy.deepcopy(master.get('login_configs', {}))
+    base = ctx.root / (ctx.cfg.get('companyStore') or {}).get('dir', '岗位交接/公司')
+    sources = []
+    seen = set()
+    for file in sorted(base.glob('*/*/登录*.json')):
+        if not re.fullmatch(r'登录(?:@[^/]+)?\.json', file.name):
+            continue
+        if file.is_symlink() or not file.resolve().is_relative_to(base.resolve()):
+            raise SystemExit('旧登录配置路径不在公司交接目录')
+        config = json.loads(file.read_text(encoding='utf-8'))
+        company, origin = config.get('companyId'), config.get('origin')
+        matches = [code for code, site in sites.items() if site['公司编码'] == company and site['站点'] == origin]
+        if len(matches) != 1 or (company, matches[0]) in seen:
+            raise SystemExit(f'旧登录配置无法唯一归入主表：{company}')
+        code = matches[0]
+        seen.add((company, code))
+        current = configs.setdefault(company, {}).get(code)
+        if current is not None and current != config:
+            raise SystemExit(f'主表已有不同登录配置：{company}/{code}')
+        configs[company][code] = config
+        sources.append((file, company, code, digest(config)))
+    preview_sha = digest([(str(file.relative_to(base)), company, code, sha) for file, company, code, sha in sources])
+    result = {'preview_sha': preview_sha, 'sites': [{'company': company, 'site': code} for _, company, code, _ in sources]}
+    if not quote:
+        return result
+    if not quote.strip() or expected_sha != preview_sha:
+        raise SystemExit('登录配置迁移须使用当前预览指纹及用户原话')
+    if remove_legacy:
+        if master.get('login_configs') != configs:
+            raise SystemExit('主表尚未完整持有旧登录配置')
+        for file, _, _, sha in sources:
+            if file.is_symlink() or digest(json.loads(file.read_text(encoding='utf-8'))) != sha:
+                raise SystemExit('旧登录配置在迁移后发生变化')
+        for file, _, _, _ in sources:
+            file.unlink()
+        return {**result, 'removed_legacy': len(sources)}
+    master['login_configs'] = configs
+    save_json(ctx.master, master)
+    return {**result, 'migrated': len(sources)}
+
+
+def set_site_login_config(ctx, item, quote, expected_sha):
+    """Write an approved site-entry change through the master write lock."""
+    master = ctx.load_master()
+    company, site = item['company'], item['site']
+    current = master.get('login_configs', {}).get(company, {}).get(site)
+    next_config = item['config']
+    if current is None or not quote or not quote.strip() or expected_sha != hashlib.sha256(json.dumps(current, ensure_ascii=False, sort_keys=True).encode()).hexdigest():
+        raise SystemExit('登录配置缺少当前预览指纹或用户确认')
+    changed = {key for key in current.keys() | next_config.keys() if current.get(key) != next_config.get(key)}
+    if not changed <= {'entry', 'loginPath', 'version', 'confirmation'}:
+        raise SystemExit('只允许改动入口和登录路径')
+    if next_config.get('version') != current.get('version', 1) + 1 or next_config.get('confirmation', {}).get('userQuote') != quote.strip():
+        raise SystemExit('登录配置确认记录与版本不一致')
+    master['login_configs'][company][site] = next_config
+    save_json(ctx.master, master)
+    return {'written': True, 'company': company, 'site': site}
+
+
 def _check_https(value, what):
     if not re.fullmatch(r'https://\S+', str(value or '')):
         raise SystemExit(f'{what} 必须是完整的 https 链接：{value!r}')
@@ -1849,6 +1912,13 @@ def main():
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, 投递链接: url|null}]')
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
     p.add_argument('--preview', action='store_true')
+    p = sub.add_parser('migrate-login-configs')
+    p.add_argument('--quote')
+    p.add_argument('--expect-sha')
+    p.add_argument('--remove-legacy', action='store_true')
+    p = sub.add_parser('set-site-login-config')
+    p.add_argument('--quote', required=True)
+    p.add_argument('--expect-sha', required=True)
     p = sub.add_parser('set-site-links')
     p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 站点编码, 登录链接?: url|null, 账号核对页?: url, retire_to?: 保留站点编码}]')
     p.add_argument('--quote', default='', help='用户确认原话（--preview 时可省）')
@@ -1947,6 +2017,18 @@ def main():
         else:
             with exclusive(ctx):
                 out = link_exception(ctx, read(a.input), a.quote)
+    elif a.cmd == 'migrate-login-configs':
+        if a.remove_legacy and not a.quote:
+            raise SystemExit('清理旧登录配置需要已确认的迁移预览')
+        if a.quote:
+            with exclusive(ctx):
+                out = migrate_login_configs(ctx, a.expect_sha, a.quote, a.remove_legacy)
+        else:
+            out = migrate_login_configs(ctx)
+    elif a.cmd == 'set-site-login-config':
+        item = json.load(sys.stdin)
+        with exclusive(ctx):
+            out = set_site_login_config(ctx, item, a.quote, a.expect_sha)
     elif a.cmd in ('relink', 'set-apply-link', 'set-site-links'):
         fn = {'relink': relink, 'set-apply-link': set_apply_link, 'set-site-links': set_site_links}[a.cmd]
         if a.preview:
