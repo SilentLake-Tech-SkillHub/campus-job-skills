@@ -92,4 +92,14 @@ class ApprovalPersistenceTests(unittest.TestCase):
    self.assertEqual(debug['approvalPath'],str((root/hook.APPROVALS).resolve()))
    self.assertEqual(debug['session'],'one');self.assertTrue(debug['approved'])
 
+ def test_maintenance_switch_is_reported_as_its_own_authorization_source(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);(root/'产品管理').mkdir()
+   (root/hook.SWITCH).write_text('{"开启":true}')
+   self.assertIsNone(hook.component_violation(root,{'session_id':'one','hook_event_name':'PreToolUse',
+     'tool_name':'Edit','tool_input':{'file_path':str(root/'.agents/skills/campus-job-application/SKILL.md')}}))
+   report=json.loads((root/'.runtime/组件软锁诊断.json').read_text())
+   self.assertEqual(report['authorizationSource'],'user_maintenance_switch')
+   self.assertTrue(report['approved']);self.assertFalse((root/hook.APPROVALS).exists())
+
 if __name__=='__main__':unittest.main()

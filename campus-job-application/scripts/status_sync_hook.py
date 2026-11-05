@@ -555,7 +555,7 @@ def approved(root, payload):
     v = _load_approvals(root).get(_session(payload))
     allowed = bool(v) and v.get('expiresAt', 0) > time.time()
     _debug(root, payload.get('hook_event_name') or 'PreToolUse', payload, False,
-           operation='check', sessionRecorded=bool(v), approved=bool(allowed))
+           operation='check', authorizationSource='conversation_record', sessionRecorded=bool(v), approved=bool(allowed))
     return allowed
 
 
@@ -681,7 +681,11 @@ def component_violation(root, payload):
         return f'组件维护开关 {SWITCH} 只能由用户本人修改，AI 不得写入。'
     if any(t == APPROVALS for t in targets):
         return f'组件维护批准记录 {APPROVALS} 只由 Hook 根据用户本人的消息写入，AI 不得写入。'
-    if maintenance_on(root) or approved(root, payload):
+    if maintenance_on(root):
+        _debug(root, payload.get('hook_event_name') or 'PreToolUse', payload, False,
+               operation='check', authorizationSource='user_maintenance_switch', approved=True)
+        return None
+    if approved(root, payload):
         return None
     bad = sorted({t for t in targets if _locked(t, include_switch=False)})
     if not bad:
