@@ -9,6 +9,10 @@ stdin 为宿主 Hook payload。
 - 对话结束（Stop）：存在未写入且用户未选择延后的改动时阻止结束，要求询问“现在写入还是下一轮写入”。
 """
 import argparse
+import contextlib
+import hashlib
+import tempfile
+import time
 import json
 import os
 import re
@@ -324,13 +328,16 @@ def maintenance_on(root):
         return False
 
 
-def _debug(root, event, payload, found):
+def _debug(root, event, payload, found, **details):
     """只记字段名和是否取到原话，不记内容；排查宿主 payload 用，覆盖写。"""
     try:
         f = root / '.runtime/组件软锁诊断.json'
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_text(json.dumps({'event': event, 'keys': sorted(payload)[:40], 'session': _session(payload),
-                                 'promptFound': found, 'at': __import__('time').strftime('%Y-%m-%d %H:%M:%S')},
+                                 'workspace': str(Path(root).resolve()), 'source': str(Path(__file__).resolve()),
+                                 'approvalPath': str((root / APPROVALS).resolve()),
+                                 'promptFound': found, 'at': __import__('time').strftime('%Y-%m-%d %H:%M:%S'),
+                                 **details},
                                 ensure_ascii=False, indent=2), encoding='utf-8')
     except OSError:
         pass
@@ -461,36 +468,95 @@ def without_injected_rules(root, prompt):
     return '\n'.join(line for line in prompt.splitlines() if line.strip() not in injected)
 
 
+@contextlib.contextmanager
+def _approval_lock(root):
+    """Serialize the complete read/change/replace across every host process."""
+    directory = root / '.runtime'
+    directory.mkdir(parents=True, exist_ok=True)
+    with (directory / '.组件维护批准.lock').open('a+b') as file:
+        try:
+            import fcntl
+            operation = lambda unlock=False: fcntl.flock(file, fcntl.LOCK_UN if unlock else fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except ImportError:
+            import msvcrt
+            if file.seek(0, 2) == 0:
+                file.write(b'\0'); file.flush()
+            def operation(unlock=False):
+                file.seek(0)
+                msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK if unlock else msvcrt.LK_NBLCK, 1)
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                operation()
+                break
+            except OSError as error:
+                if error.errno not in (11, 13, 35) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(.02)
+        try:
+            yield
+        finally:
+            operation(True)
+
+
+def _save_approvals(root, data):
+    """Publish one complete file, then verify those bytes before reporting success."""
+    target = root / APPROVALS
+    body = json.dumps(data, ensure_ascii=False, indent=2).encode('utf-8')
+    descriptor, temporary = tempfile.mkstemp(prefix='.组件维护批准.', suffix='.tmp', dir=target.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(body); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        saved = target.read_bytes()
+        if saved != body:
+            raise OSError('批准记录写入后读回不一致')
+        return hashlib.sha256(saved).hexdigest()
+    finally:
+        try:
+            Path(temporary).unlink()
+        except FileNotFoundError:
+            pass
+
+
 def record_approval(root, payload):
-    """只看用户本人发出的消息：明确批准修改组件 → 记录本会话批准；收回 → 删除。返回给 AI 的提示。"""
+    """Only the host's user event may persist approval; ordinary reads never renew it."""
     prompts = _approval_prompts(payload)
     _debug(root, 'UserPromptSubmit', payload, any(p.strip() for p in prompts))
     prompts = [without_injected_rules(root, p) for p in prompts]
     if not any(p.strip() for p in prompts):
         return ''
-    sid, data = _session(payload), _load_approvals(root)
-    now = __import__('time').time()
-    data = {k: v for k, v in data.items() if v.get('expiresAt', 0) > now}
-    note = ''
+    sid = _session(payload)
     approval_quotes = [quote for prompt in prompts for quote in component_approval_quotes(prompt)]
-    if any(direct_revocation(p) for p in prompts):
-        data.pop(sid, None)
-        note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'
-    elif approval_quotes:
-        hours = 2 if sid == '_no_session' else APPROVAL_HOURS
-        data[sid] = {'userQuote': '\n'.join(approval_quotes)[:300], 'approvedAt': now, 'expiresAt': now + hours * 3600}
-        note = f'\n【组件软锁】已记录用户批准：本会话可以修改搜索组件、投递组件和 Hook 配置（{hours} 小时内有效，用户说“收回授权”即失效）。修改仍须按用户的具体要求进行，并逐项汇报。'
-    else:
-        return '\n【组件软锁】本会话已获用户批准修改组件。' if sid in data else ''
-    f = root / APPROVALS
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
-    return note
+    revoked = any(direct_revocation(p) for p in prompts)
+    if not revoked and not approval_quotes:
+        return '\n【组件软锁】本会话已获用户批准修改组件。' if approved(root, payload) else ''
+    try:
+        with _approval_lock(root):
+            now = time.time()
+            data = {k: v for k, v in _load_approvals(root).items() if v.get('expiresAt', 0) > now}
+            if revoked:
+                data.pop(sid, None)
+                note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'
+            else:
+                hours = 2 if sid == '_no_session' else APPROVAL_HOURS
+                data[sid] = {'userQuote': '\n'.join(approval_quotes)[:300], 'approvedAt': now, 'expiresAt': now + hours * 3600}
+                note = f'\n【组件软锁】已记录用户批准：本会话可以修改搜索组件、投递组件和 Hook 配置（{hours} 小时内有效，用户说“收回授权”即失效）。修改仍须按用户的具体要求进行，并逐项汇报。'
+            digest = _save_approvals(root, data)
+            _debug(root, 'UserPromptSubmit', payload, True, operation='revoke' if revoked else 'approve',
+                   saved=True, approvalSha256=digest, sessionRecorded=sid in data)
+        return note + f'\n【批准保存核对】会话 {sid}；文件 {root / APPROVALS}；读回 SHA256 {digest}。'
+    except OSError as error:
+        _debug(root, 'UserPromptSubmit', payload, True, saved=False, error=str(error))
+        return f'\n【组件软锁】批准记录保存失败，未确认生效：{error}。目标文件：{root / APPROVALS}。'
 
 
 def approved(root, payload):
     v = _load_approvals(root).get(_session(payload))
-    return bool(v) and v.get('expiresAt', 0) > __import__('time').time()
+    allowed = bool(v) and v.get('expiresAt', 0) > time.time()
+    _debug(root, payload.get('hook_event_name') or 'PreToolUse', payload, False,
+           operation='check', sessionRecorded=bool(v), approved=bool(allowed))
+    return allowed
 
 
 def _rel(root, cwd, t):
