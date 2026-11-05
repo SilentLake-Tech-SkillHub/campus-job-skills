@@ -1194,7 +1194,7 @@ def upsert(ctx, items):
                 jcode = M.next_code(master, 'J')
                 set_cell(row, idx[M.ROLE_CODE_COL], jcode)
                 if link:
-                    set_cell(row, idx[M.SITE_CODE_COL], M.ensure_site(master, ccode, M.origin(link)))
+                    set_cell(row, idx[M.SITE_CODE_COL], M.ensure_application_site(master, ccode, M.origin(link)))
                 key = {'sheet': s['name'], 'code': jcode}
                 added += 1
             else:
@@ -1393,8 +1393,7 @@ def _check_https(value, what):
 
 def relink(ctx, items, quote, preview=False, allow_in_batch=False):
     """更换已有岗位行的岗位链接（按岗位编码）。编码不变，引用它的记录都不受影响。
-    新链接在同一站点：只覆盖值；在新域名：按“新域名 = 新站点”规则对应到该公司的站点（没有就新建），岗位改挂新站点，
-    原投递链接属于旧站点，一并清空。preview 只返回逐行“岗位链接 X → Y”，用户确认后带原话执行。
+    新链接在同一站点只覆盖值；跨域须核对已登记的实际投递入口，不根据详情页域名自动增设站点。preview 只返回逐行“岗位链接 X → Y”，用户确认后带原话执行。
     items：[{code: 岗位编码, new_link}]。"""
     if not preview and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户确认原话')
@@ -1420,6 +1419,7 @@ def relink(ctx, items, quote, preview=False, allow_in_batch=False):
                 raise SystemExit(f'{describe(key, master)} 新链接已被同公司其它岗位使用' + (f'（{name}!{clash[0]}）' if clash else '（本次输入重复）'))
         taken.add((ccode, new.rstrip('/')))
         old_site = cell_value(row, idx[M.SITE_CODE_COL])
+        M.check_application_site(master, ccode, M.origin(new))
         same_site = M.origin(new) == (M.sites(master).get(old_site) or {}).get('站点')
         line = (f"{describe(key, master)}：岗位链接「{old or '空'}」→「{new}」（岗位编码不变，投递状态不变）"
                 + ('' if same_site else f"；新链接在另一个域名 {M.origin(new)}，岗位改挂该域名的站点，原投递链接清空"))
@@ -1433,7 +1433,7 @@ def relink(ctx, items, quote, preview=False, allow_in_batch=False):
     for s, idx, row, key, new, same_site, line in plan:
         values.append((row, idx[LINK_COL], new, key['code'], LINK_COL, line))
         if not same_site:
-            values.append((row, idx[M.SITE_CODE_COL], M.ensure_site(master, cell_value(row, idx[M.COMPANY_CODE_COL]), M.origin(new)),
+            values.append((row, idx[M.SITE_CODE_COL], M.ensure_application_site(master, cell_value(row, idx[M.COMPANY_CODE_COL]), M.origin(new)),
                            key['code'], M.SITE_CODE_COL, line))
             values.append((row, idx[M.APPLY_COL], None, key['code'], M.APPLY_COL, line))
     _confirm_values(ctx, master, values, quote, 'relink')

@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company search in this project — work through the master JSON's 待搜索 queue (or companies the user names), verify official plans and in-scope roles, write results only through the fixed script, get user confirmation for every status change, and hand confirmed roles to the application component through forward review. It never fills or submits applications.
 metadata:
-  version: "2.1.1"
+  version: "2.1.2"
 ---
 
 # 校招岗位搜索与主表维护
@@ -41,7 +41,7 @@ metadata:
 5. **任职资格**：按 [任职资格核对](references/eligibility-check.md) 分别判断职责是否在范围内、个人是否满足条件。
 6. **写入主数据**：
    - 每个已核岗位用 `upsert` 写一行：岗位名称只写官网原名，岗位链接是该岗位的 https 官网详情页，填工作地点、完整 JD、所属BU（无则“未披露”）、校招计划、投递截止（日期或“公司未披露”）。新行状态为空，随后 `propose` 为“岗位待筛选”，用户确认后 `confirm`。
-   - 已有岗位换链接（官网换了详情页，或原链接不是详情页）：`relink --input <[{code,new_link}]> --preview` 把“岗位链接 X → Y”原样给用户看，确认后 `relink --quote`；岗位编码不变，投递状态、志愿顺序、确认记录都挂在编码上不受影响；新链接换了域名时按“新域名 = 新站点”挂到该公司的新站点并清空旧投递链接。不能用 `upsert` 直接改已有行的链接。岗位在已交接的批次里时只能走投递回传 → `apply-observations`。
+   - 已有岗位换链接（官网换了详情页，或原链接不是详情页）：`relink --input <[{code,new_link}]> --preview` 把“岗位链接 X → Y”原样给用户看，确认后 `relink --quote`；岗位编码不变，投递状态、志愿顺序、确认记录都挂在编码上不受影响；详情页换域名时先核对实际投递入口，不能据此新建投递站点。不能用 `upsert` 直接改已有行的链接。岗位在已交接的批次里时只能走投递回传 → `apply-observations`。
    - 官网没有独立的岗位详情页（只能用带官方岗位ID的列表链接定位）：`link-exception --code <岗位编码> --preview` 把备注“当前 → 用户例外保留：官网无独立详情页。<定位说明>”原样给用户看，确认后 `link-exception --quote`；组批时只免“列表页”检查，仍须 https 官网、带官方岗位ID、不与其它岗位共用。这种备注不能用 `upsert` 写或改。
    - 公司行：搜完有岗位的 `propose`“已有岗位”；没有符合要求岗位的 `propose`“公司无合适岗位”；用户确认后 `confirm`。新增岗位不占用公司行；新公司由 `upsert` 自动补公司行（状态为空，同样须确认）。
    - 官方校招入口写“校招主链接”，计划写“校招计划”，公司投递规则用 `set-quota-rules` 整家覆盖写“投递名额”。

@@ -210,6 +210,25 @@ def ensure_site(master, company_code, site_origin):
     return code
 
 
+def check_application_site(master, company_code, site_origin):
+    """Live input may reuse known sites. A detail-page domain cannot create a
+    second application system for a company that already has a site."""
+    if not site_origin:
+        raise SystemExit('岗位链接不是官网链接，不能确定站点')
+    if site_of(master, company_code, site_origin):
+        return
+    registered = [code for code, site in sites(master).items()
+                  if site['公司编码'] == company_code and site['状态'] != SITE_RETIRED]
+    if registered:
+        raise SystemExit(f'{company_code} 已登记投递站点 {", ".join(registered)}；'
+                         f'岗位详情域名 {site_origin} 不能自动新建站点，请先核对官网实际投递入口')
+
+
+def ensure_application_site(master, company_code, site_origin):
+    check_application_site(master, company_code, site_origin)
+    return ensure_site(master, company_code, site_origin)
+
+
 def set_site_value(master, site_code, field, value):
     s, head, _ = _rows(master, SITE_SHEET)
     row = sites(master)[site_code]['row']

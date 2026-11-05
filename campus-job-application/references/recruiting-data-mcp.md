@@ -16,7 +16,7 @@
 | `recruiting_link_exception_preview` | `link-exception --preview` | 只读：官网无独立详情页时，登记或撤销链接例外前生成备注“当前 → 更新”，必须原样给用户看 |
 | `recruiting_link_exception_confirm` | `link-exception --quote` | 用户确认后写固定格式的链接例外备注并记入台账；forward 据此只免“列表页”检查 |
 | `recruiting_link_change_preview` | `relink --preview` | 只读：按岗位编码更换已有岗位链接前生成“岗位链接 X → Y”，必须原样给用户看 |
-| `recruiting_link_change_confirm` | `relink --quote` | 用户确认后换链接：岗位编码不变，状态、确认记录、志愿顺序都挂在编码上不动；新域名挂新站点并清空旧投递链接；岗位在已交接批次中时拒绝（走 `apply-observations`） |
+| `recruiting_link_change_confirm` | `relink --quote` | 用户确认后换链接：岗位编码不变，状态、确认记录、志愿顺序都挂在编码上不动；新详情域名不能自动建投递站点；岗位在已交接批次中时拒绝（走 `apply-observations`） |
 | `recruiting_apply_link_preview` | `set-apply-link --preview` | 只读：按岗位编码设置或清空投递链接（须与岗位站点同域），生成“投递链接 X → Y” |
 | `recruiting_apply_link_confirm` | `set-apply-link --quote` | 用户确认后写投递链接 |
 | `recruiting_site_links_preview` | `set-site-links --preview` | 只读：按站点编码设置登录链接、账号核对页（核对页不能为空），生成“当前 → 更新” |
