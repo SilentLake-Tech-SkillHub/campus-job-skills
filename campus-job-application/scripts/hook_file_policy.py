@@ -520,6 +520,11 @@ def shell_effects(command, cwd, root, registered=(), sync_script=None):
             script = next((a for a in args if not a.startswith('-')), None)
             if re.fullmatch(r'python(?:\d+(?:\.\d+)*)?', name) and script and sync_script and path_at(script, cwd) == Path(sync_script).resolve():
                 continue
+            # The component owns this fixed profile writer. An identically named
+            # external script is not trusted. Redirections were inspected above.
+            profile_writer = Path(root) / '.agents/skills/job-application-assistant-v2/scripts/business-authorization.mjs'
+            if name == 'node' and script and path_at(script, cwd) == profile_writer.resolve():
+                continue
             for arg in plain[1:]:
                 p = path_at(arg, cwd)
                 if p is not None: out.append(Effect('unknown', p))

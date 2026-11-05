@@ -71,10 +71,11 @@ def label_groups(root, cfg):
 
 def protected(cfg):
     base = (cfg.get('companyStore') or {}).get('dir', '岗位交接/公司')
+    profile = os.environ.get('RECRUITING_PROFILE_JSON') or cfg.get('profileFile', '产品管理/网申个人信息主档.json')
     # 公司宽表文件只由 company_store.py 生成；投递回传只由投递组件写入、company_store.py 消费
     return [cfg['workbook'], cfg['masterData'], cfg['confirmationLedger'], LABELS_FILE, *cfg.get('labelGroups', []),
             base + '/', str(Path(base).with_name('投递回传.json')), '产品管理/user_applicaiton_requirements_temp.json',
-            '.runtime/user_application_requirements_state.json']
+            '.runtime/user_application_requirements_state.json', profile]
 
 
 def sync(root, *args):

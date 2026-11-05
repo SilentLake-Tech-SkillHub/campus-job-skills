@@ -981,5 +981,18 @@
   "args": {
    "command": "ls other >&2; ls other 2>&1; ls other 2>&-; ls other &>/dev/null; ls other >|/dev/null"
   }
- }
+ },
+  {"name": "profile-editor-write", "tool": "Edit", "args": {"file_path": "{{ROOT}}/产品管理/网申个人信息主档.json", "old_string": "PDF", "new_string": "Word"}, "allow": false},
+  {"name": "profile-shell-write", "tool": "Bash", "args": {"command": "printf '{}' > 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-read", "tool": "read_file", "args": {"path": "{{ROOT}}/产品管理/网申个人信息主档.json"}, "allow": true},
+  {"name": "profile-unrelated-json", "tool": "write_file", "args": {"path": "{{ROOT}}/other/profile.json", "content": "{}"}, "allow": true},
+  {"name": "profile-copy-overwrite", "tool": "Bash", "args": {"command": "cp /tmp/input.json 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-delete-parent", "tool": "Bash", "args": {"command": "rm -r 产品管理"}, "allow": false},
+  {"name": "profile-custom-location", "config": {"profileFile": "private/candidate.json"}, "tool": "Edit", "args": {"file_path": "{{ROOT}}/private/candidate.json"}, "allow": false},
+  {"name": "profile-business-fixed-writer", "tool": "Bash", "args": {"command": "node .agents/skills/job-application-assistant-v2/scripts/business-authorization.mjs set --value 1 --quote '用户授权原话' --profile 产品管理/网申个人信息主档.json"}, "allow": true},
+  {"name": "profile-business-writer-with-redirect", "tool": "Bash", "args": {"command": "node .agents/skills/job-application-assistant-v2/scripts/business-authorization.mjs status --profile 产品管理/网申个人信息主档.json > 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-spoofed-writer", "tool": "Bash", "args": {"command": "node /tmp/business-authorization.mjs set --profile 产品管理/网申个人信息主档.json"}, "allow": false},
+  {"name": "profile-inline-write", "tool": "Bash", "args": {"command": "python3 -c \"open('产品管理/网申个人信息主档.json','w').write('{}')\""}, "allow": false},
+  {"name": "profile-git-boundary-unchanged", "tool": "Bash", "args": {"command": "git diff -- 产品管理/网申个人信息主档.json"}, "allow": true},
+  {"name": "profile-mcp-fixed-answers", "tool": "mcp__recruiting_application_v2__profile_record_answers", "args": {"evidence": "用户本轮原话", "answers": []}, "allow": true}
 ]
