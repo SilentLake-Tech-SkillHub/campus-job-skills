@@ -580,8 +580,8 @@ def _rel(root, cwd, t):
     p = Path(t).expanduser()
     p = p if p.is_absolute() else Path(cwd) / p
     try:
-        return Path(os.path.normpath(str(p))).relative_to(root).as_posix()
-    except ValueError:
+        return p.resolve().relative_to(root.resolve()).as_posix()
+    except (OSError, RuntimeError, ValueError):
         return None
 
 

@@ -103,6 +103,30 @@ class ApprovalPersistenceTests(unittest.TestCase):
    self.assertFalse(latest['lastCheck']['approved'])
 
 
+ def test_native_hook_cli_compares_real_paths_and_keeps_write_and_check(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td).resolve()/'workspace';root.mkdir()
+   alias=root.parent/'workspace-alias';alias.symlink_to(root,target_is_directory=True)
+   (root/'产品管理').mkdir()
+   cfg={'schemaVersion':1,'rowKind':'role','column':'投递状态','sheets':[],
+        'labels':[{'value':'岗位待筛选'}],'masterData':'fixture.json','workbook':'fixture.xlsx','confirmationLedger':'ledger.json'}
+   (root/hook.LABELS_FILE).write_text(json.dumps(cfg),encoding='utf-8')
+   command=[sys.executable,hook.__file__,'--workspace',str(root),'--host','codex']
+   def call(payload):
+    return json.loads(subprocess.run(command,input=json.dumps(payload),capture_output=True,text=True,check=True).stdout)
+   approval=call({'hook_event_name':'UserPromptSubmit','session_id':'approved','prompt':'批准修改组件'})
+   self.assertIn('批准保存核对',approval['hookSpecificOutput']['additionalContext'])
+   request={'hook_event_name':'PreToolUse','session_id':'approved','tool_name':'Edit',
+            'tool_input':{'file_path':str(alias/'.agents/skills/campus-job-application/SKILL.md')}}
+   self.assertEqual(call(request),{})
+   denial=call({**request,'session_id':'other'})
+   self.assertEqual(denial['hookSpecificOutput']['permissionDecision'],'deny')
+   report=json.loads((root/'.runtime/组件软锁诊断.json').read_text())
+   self.assertEqual(report['lastApproval']['session'],'approved')
+   self.assertTrue(report['lastApproval']['saved'])
+   self.assertEqual(report['lastCheck']['session'],'other')
+   self.assertFalse(report['lastCheck']['approved'])
+
  def test_maintenance_switch_is_reported_as_its_own_authorization_source(self):
   with tempfile.TemporaryDirectory() as td:
    root=Path(td);(root/'产品管理').mkdir()
