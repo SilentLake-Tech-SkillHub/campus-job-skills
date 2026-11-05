@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company search in this project — work through the master JSON's 待搜索 queue (or companies the user names), verify official plans and in-scope roles, write results only through the fixed script, get user confirmation for every status change, and hand confirmed roles to the application component through forward review. It never fills or submits applications.
 metadata:
-  version: "2.1.3"
+  version: "2.1.4"
 ---
 
 # 校招岗位搜索与主表维护
