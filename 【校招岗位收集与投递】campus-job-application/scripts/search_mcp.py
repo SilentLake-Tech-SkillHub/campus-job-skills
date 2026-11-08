@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """MCP transport adapter; all business execution uses the independent core CLI."""
-import functools,json,subprocess,sys
+import functools,json,subprocess,sys,os
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from search_service import OPERATIONS
+from search_release import source_fingerprint,schema_fingerprint,interface_fingerprint
+loaded_interface=interface_fingerprint()
+loaded_schema=schema_fingerprint(OPERATIONS)
 server=FastMCP(
     'campus-search',
     instructions=(
@@ -22,7 +25,9 @@ server=FastMCP(
 def adapter(fn):
     @functools.wraps(fn)
     def invoke(**arguments):
-        p=subprocess.run([sys.executable,'-B',str(Path(__file__).with_name('search_cli.py')),fn.__name__],input=json.dumps(arguments),capture_output=True,text=True,encoding='utf-8')
+        if interface_fingerprint()!=loaded_interface:raise ValueError('SEARCH_INTERFACE_CODE_STALE')
+        env={**os.environ,'CAMPUS_SEARCH_EXPECTED_SOURCE':source_fingerprint(),'CAMPUS_SEARCH_EXPECTED_SCHEMA':loaded_schema}
+        p=subprocess.run([sys.executable,'-B',str(Path(__file__).with_name('search_cli.py')),fn.__name__],env=env,input=json.dumps(arguments),capture_output=True,text=True,encoding='utf-8')
         if p.returncode:raise ValueError((p.stderr or p.stdout).strip())
         return json.loads(p.stdout)
     return invoke

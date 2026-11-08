@@ -23,3 +23,13 @@ class IndependentServiceTests(unittest.TestCase):
     def test_component_directory_cannot_hold_private_search_data(self):
         with patch.dict(os.environ,{'CAMPUS_SEARCH_PRIVATE_DIR':str(Path(__file__).resolve().parent)}):
             with self.assertRaisesRegex(ValueError,'USER_DATA_OUTSIDE_COMPONENT_REQUIRED'):configure('/tmp/synthetic-workspace')
+
+    def test_mcp_and_cli_report_identical_release_and_stale_schema_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            with patch.dict(os.environ,{'CAMPUS_RECRUITING_WORKSPACE':temp,'CAMPUS_SEARCH_PRIVATE_DIR':temp}):
+                core=execute('search_runtime_info',{})
+                native=asyncio.run(call({'tool':'search_runtime_info','arguments':{}}))
+                self.assertEqual(core,native)
+                env={**os.environ,'CAMPUS_SEARCH_EXPECTED_SCHEMA':'old'}
+                result=subprocess.run([sys.executable,'-B',str(Path(__file__).with_name('search_cli.py')),'search_runtime_info'],env=env,input='{}',text=True,capture_output=True)
+                self.assertNotEqual(result.returncode,0);self.assertIn('SEARCH_INTERFACE_SCHEMA_STALE',result.stderr)

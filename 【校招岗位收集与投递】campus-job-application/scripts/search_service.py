@@ -234,3 +234,9 @@ def search_task_retry(batch_id:str,task_id:str,recovery_reason:str)->dict:
 
 
 
+
+@operation
+def search_runtime_info()->dict:
+    """读取当前搜索业务核心与接口定义的代码指纹；不操作网站和主数据。"""
+    from search_release import source_fingerprint,schema_fingerprint
+    return {"sourceFingerprint":source_fingerprint(),"schemaFingerprint":schema_fingerprint(OPERATIONS)}

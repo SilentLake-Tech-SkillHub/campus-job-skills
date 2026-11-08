@@ -2,6 +2,8 @@
 """Independent search-component API. JSON input on stdin, JSON result on stdout."""
 import argparse,json,os,sys
 from pathlib import Path
+from search_release import source_fingerprint,schema_fingerprint
+loaded_source=source_fingerprint()
 from search_service import OPERATIONS,execute
 from search_paths import configure
 
@@ -13,7 +15,13 @@ def main():
     if args.workspace:
         configure(args.workspace)
     if args.operation=='list':result=[{'name':name,'description':fn.__doc__} for name,fn in OPERATIONS.items()]
-    else:result=execute(args.operation,json.load(sys.stdin))
+    else:
+        if source_fingerprint()!=loaded_source:raise ValueError('SEARCH_SOURCE_CHANGED_DURING_LOAD')
+        expected=os.environ.get('CAMPUS_SEARCH_EXPECTED_SOURCE')
+        schema=os.environ.get('CAMPUS_SEARCH_EXPECTED_SCHEMA')
+        if expected and expected!=loaded_source:raise ValueError('SEARCH_VERSION_MISMATCH')
+        if schema and schema!=schema_fingerprint(OPERATIONS):raise ValueError('SEARCH_INTERFACE_SCHEMA_STALE')
+        result=execute(args.operation,json.load(sys.stdin))
     print(json.dumps(result,ensure_ascii=False))
 
 if __name__=='__main__':
