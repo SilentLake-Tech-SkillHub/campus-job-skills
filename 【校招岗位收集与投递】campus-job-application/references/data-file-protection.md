@@ -25,3 +25,7 @@
 组件软锁的授权识别、开关、路径范围、Git 处理及原有解析函数不在本轮修改范围。业务标签确认、正反向评审、提交授权和写入同步提醒继续独立生效。
 
 回归测试使用 `scripts/fixtures/data_protection_events.json` 的固定事件样例，通过新 Python 子进程调用实际 Hook。覆盖三个宿主输出格式及 DSH 事件封装、各宿主真实工具名、Git、纯文本、`find` 动作、JSON 只读命令、登记目录、相对路径和符号链接、未知调用、脚本名诱饵、真实同步入口及软锁独立拒绝。
+
+## 共享规则依赖
+
+文字工具及文件参数的唯一定义由投递组件hooks/tool-arguments.json维护，依赖版本、内容指纹及源路径声明于component-dependencies.json。component_dependencies.py统一解析；工作区安装可直接读取相邻的已安装投递组件，独立安装通过RECRUITING_TOOL_ARGUMENTS_FILE指定原仓库的规则路径，或在声明的checkoutPath检出固定版本。安装和CI先运行component_dependencies.py check。不得复制规则文件、维护第二份列表或放宽缺依赖时的保护行为；规则变更须更新依赖声明并验证两个消费者。

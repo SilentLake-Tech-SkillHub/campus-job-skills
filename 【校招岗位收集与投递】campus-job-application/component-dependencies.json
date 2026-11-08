@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "dependencies": {
+    "toolArguments": {
+      "owner": "job-application-assistant-v2",
+      "repository": "SilentLake-Tech-SkillHub/job-application-assistant",
+      "revision": "d1b0c293df5a2e7fc5f9e31218e59bb7d753a70b",
+      "sourcePath": "v2/hooks/tool-arguments.json",
+      "environment": "RECRUITING_TOOL_ARGUMENTS_FILE",
+      "workspacePath": "job-application-assistant-v2/hooks/tool-arguments.json",
+      "checkoutPath": ".component-dependencies/application/v2/hooks/tool-arguments.json",
+      "schemaVersion": 1,
+      "sha256": "84efc642bf78468584c45f2a4b1a0b99a2314a84adfa655d169184b5675b23ec"
+    }
+  }
+}

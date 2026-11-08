@@ -72,7 +72,9 @@ class SharedToolArgumentsTests(unittest.TestCase):
         import hook_file_policy as policy
         import status_sync_hook as hook
         spec = json.loads(policy.TOOL_ARGUMENTS_FILE.read_text(encoding='utf-8'))
-        self.assertEqual(policy.TOOL_ARGUMENTS_FILE.parent.parent.name, 'job-application-assistant-v2')
+        from component_dependencies import dependency, load_contract
+        self.assertEqual(dependency('toolArguments')['owner'], 'job-application-assistant-v2')
+        self.assertEqual(load_contract('toolArguments'), spec)
         self.assertEqual(set(policy.TEXT_TOOLS), {t.lower() for t in spec['textTools']})
         self.assertEqual(policy.PATH_KEYS, tuple(spec['fileArgumentKeys']))
         self.assertIs(hook.PATH_KEYS, policy.PATH_KEYS)

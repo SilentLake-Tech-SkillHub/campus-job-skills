@@ -72,3 +72,5 @@ metadata:
 `search_paths.py` 统一工作区及私有搜索目录，个人资料和运行结果在组件外；更新业务脚本后下次调用生效。MCP 接口本身的改动按接口部署处理。外部证据和队列使用既有固定目录，主数据只经 json_excel_sync.py，交接只经 company_store.py。
 
 CLI/MCP版本校验：search_runtime_info返回当前业务代码及接口定义指纹；MCP转发前绑定当前安装代码指纹与已加载接口定义，CLI执行前复核。接口代码或签名落后时返回明确错误，当前业务不执行；业务脚本每次加载当前部署代码。
+
+安装及独立发布先按component-dependencies.json装配共享规则原仓库的固定版本，运行scripts/component_dependencies.py check确认唯一源文件及内容指纹。定位方式见references/data-file-protection.md。依赖文件只引用，不复制到搜索组件。

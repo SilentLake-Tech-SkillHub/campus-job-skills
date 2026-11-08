@@ -24,12 +24,13 @@ LITERAL = r'''("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')'''
 # application component next to its own executor hook (sibling folder of this component). Missing or
 # unreadable: no tool is text-only and no argument name is trusted; file tools then fall back to the
 # registered-file scan in mentioned(), which still protects every registered data file.
-TOOL_ARGUMENTS_FILE = Path(__file__).resolve().parents[2] / 'job-application-assistant-v2/hooks/tool-arguments.json'
+from component_dependencies import contract_path, load_contract
+TOOL_ARGUMENTS_FILE = contract_path('toolArguments')
 
 
 def tool_arguments(spec_file=TOOL_ARGUMENTS_FILE):
     try:
-        spec = json.loads(Path(spec_file).read_text(encoding='utf-8'))
+        spec = load_contract('toolArguments', spec_file)
         return frozenset(t.lower() for t in spec['textTools']), tuple(spec['fileArgumentKeys'])
     except (OSError, ValueError, KeyError, TypeError):
         return frozenset(), ()
