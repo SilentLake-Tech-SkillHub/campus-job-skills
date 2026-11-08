@@ -13,7 +13,7 @@ CASES = json.loads((HERE / 'fixtures/data_protection_events.json').read_text(enc
 
 class HookProcessTests(unittest.TestCase):
     def expand(self, value, root):
-        if isinstance(value, str): return value.replace('{{ROOT}}', str(root))
+        if isinstance(value, str): return value.replace('{{OTHER_JSON}}', json.dumps(str(root/'other'), ensure_ascii=False)).replace('{{ROOT}}', str(root))
         if isinstance(value, list): return [self.expand(v, root) for v in value]
         if isinstance(value, dict): return {k: self.expand(v, root) for k, v in value.items()}
         return value

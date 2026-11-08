@@ -488,7 +488,7 @@
   "allow": true,
   "tool": "functions.exec",
   "args": {
-   "input": "text(await tools.exec_command({workdir: \"{{ROOT}}/other\", cmd: \"cat book.xlsx\"}));"
+   "input": "text(await tools.exec_command({workdir: {{OTHER_JSON}}, cmd: \"cat book.xlsx\"}));"
   }
  },
  {
