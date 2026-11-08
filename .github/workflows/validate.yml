@@ -1,8 +1,11 @@
 name: Validate skills and search MCP
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   validate:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
@@ -14,5 +17,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Read declared component dependency
+        id: dependency
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          spec = json.load(open('component-dependencies.json', encoding='utf-8'))['dependencies']['toolArguments']
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              output.write('repository=' + spec['repository'] + '\n')
+              output.write('revision=' + spec['revision'] + '\n')
+          PY
+      - name: Install original rule owner at declared revision
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.dependency.outputs.repository }}
+          ref: ${{ steps.dependency.outputs.revision }}
+          path: .component-dependencies/application
+          persist-credentials: false
+      - name: Verify declared dependency contract
+        run: python scripts/component_dependencies.py check
       - run: python -m pip install -r scripts/search-mcp-requirements.txt
       - run: python -m unittest discover -s scripts -p 'test*.py' -q
