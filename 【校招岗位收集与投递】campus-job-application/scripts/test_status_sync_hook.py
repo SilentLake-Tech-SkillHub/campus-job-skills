@@ -1,4 +1,5 @@
 import json
+import shlex
 import os
 import tempfile
 import unittest
@@ -587,7 +588,7 @@ class ReadOnlyCommandsAreNotWritesTests(unittest.TestCase):
                 self.assertIn('组件只读', self.verdict(command, v2) or '')
         anywhere = [
             f'echo hi > {v2}/a.txt', f"echo hi >> '{v2}/a.txt'", f'P={v2}/a.txt; echo hi > "$P"',
-            f'ROOT={self.root}; echo hi > "$ROOT/{v2}/a.txt"', f'cd {v2}; D={self.SP}; X=a.txt; echo hi > $X',
+            f'ROOT={shlex.quote(str(self.root))}; echo hi > "$ROOT/{v2}/a.txt"', f'cd {v2}; D={shlex.quote(str(self.SP))}; X=a.txt; echo hi > $X',
             f"python3 -c \"import os; os.system('echo hi > {v2}/a.txt')\"", f"bash -c 'echo hi > {v2}/a.txt'",
             f"python3 - <<'EOF'\nimport os\nos.system('echo hi > {v2}/a.txt')\nEOF",
             f'D={v2}; cp /tmp/a "$D/a.txt"', f'D={v2}; rm "$D/a.txt"', f'D={v2}; cd "$D"; rm a.txt',

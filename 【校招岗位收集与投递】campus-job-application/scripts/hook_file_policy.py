@@ -97,7 +97,14 @@ def mentioned(payload_value, cwd, registered, reason):
             import os
             refs = [str(target), os.path.relpath(target, cwd)]
             tail = r'(?:/[^\s\'";|&]*)?' if raw.endswith('/') else ''
-            hit = any(re.search(r'(?<![\w./-])' + re.escape(ref) + tail + r'(?![\w./-])', text) for ref in refs)
+            # Registered paths may appear with native, mixed or JSON-escaped
+            # separators in an unresolved payload. Keep the registered-object
+            # check when parsing fails on Windows paths as well.
+            def reference_text(value):
+                normalized = re.sub(r'/+', '/', value.replace('\\', '/'))
+                return normalized.casefold() if os.name == 'nt' else normalized
+            haystack = reference_text(text)
+            hit = any(re.search(r'(?<![\w./-])' + re.escape(reference_text(ref)) + tail + r'(?![\w./-])', haystack) for ref in refs)
             if not hit:
                 literals = re.findall(LITERAL, text)
                 for value in literals:

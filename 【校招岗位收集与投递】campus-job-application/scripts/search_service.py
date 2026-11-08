@@ -14,6 +14,9 @@ def operation(fn):
 
 def execute(name,arguments):
     configure()
+    if name!='search_runtime_info':
+        from component_dependencies import load_contract
+        load_contract('toolArguments')
     import inspect
     fn=OPERATIONS.get(name)
     if fn is None:raise ValueError('UNKNOWN_OPERATION')

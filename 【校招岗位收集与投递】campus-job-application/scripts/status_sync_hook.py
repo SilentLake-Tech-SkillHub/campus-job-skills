@@ -783,8 +783,9 @@ def main():
 
 
 if __name__ == '__main__':
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8')
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        if hasattr(stream, 'reconfigure'):
+            stream.reconfigure(encoding='utf-8')
     try:
         sys.exit(main())
     except Exception as exc:  # Hook 自身故障不阻断宿主，但要可见

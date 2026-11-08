@@ -93,3 +93,12 @@ class SharedToolArgumentsTests(unittest.TestCase):
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)
+
+class UnresolvedPathTests(unittest.TestCase):
+    def test_malformed_payload_still_matches_mixed_native_separators(self):
+        import hook_file_policy as policy
+        with tempfile.TemporaryDirectory() as temp:
+            target=Path(temp).resolve()/'book.xlsx'
+            malformed='{"path":"'+str(target).replace('/', '\\')+'"'
+            effects=policy.mentioned(malformed,temp,[str(target)],'parse failed')
+            self.assertTrue(any(effect.path==target for effect in effects))

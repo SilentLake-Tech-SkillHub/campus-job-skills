@@ -25,3 +25,11 @@ class DependencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             file=Path(temp)/'contract.json';file.write_bytes(original.replace('\n','\r\n').encode('utf-8'))
             self.assertEqual(deps.load_contract('toolArguments',file),json.loads(original))
+
+    def test_missing_required_contract_stops_business_before_queue_write(self):
+        from search_service import execute
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            with patch.dict(os.environ,{'CAMPUS_RECRUITING_WORKSPACE':temp,'CAMPUS_SEARCH_PRIVATE_DIR':str(root/'private'),'RECRUITING_TOOL_ARGUMENTS_FILE':str(root/'missing.json')}):
+                with self.assertRaisesRegex(ValueError,'COMPONENT_DEPENDENCY_MISSING'):execute('search_batch_create',{'manifest':{}})
+                self.assertFalse((root/'private'/'queue.sqlite').exists())
