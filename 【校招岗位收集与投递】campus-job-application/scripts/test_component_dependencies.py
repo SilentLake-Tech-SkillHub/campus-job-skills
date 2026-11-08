@@ -19,3 +19,9 @@ class DependencyTests(unittest.TestCase):
             with patch.object(deps,'COMPONENT',component),patch.dict(os.environ,{},clear=True):
                 self.assertEqual(deps.contract_path('toolArguments'),target)
                 self.assertEqual(deps.load_contract('toolArguments')['schemaVersion'],1)
+
+    def test_windows_line_endings_do_not_change_contract_identity(self):
+        original=deps.contract_path('toolArguments').read_text(encoding='utf-8')
+        with tempfile.TemporaryDirectory() as temp:
+            file=Path(temp)/'contract.json';file.write_bytes(original.replace('\n','\r\n').encode('utf-8'))
+            self.assertEqual(deps.load_contract('toolArguments',file),json.loads(original))

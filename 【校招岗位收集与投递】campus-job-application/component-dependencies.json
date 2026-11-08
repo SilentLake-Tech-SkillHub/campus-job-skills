@@ -10,7 +10,8 @@
       "workspacePath": "job-application-assistant-v2/hooks/tool-arguments.json",
       "checkoutPath": ".component-dependencies/application/v2/hooks/tool-arguments.json",
       "schemaVersion": 1,
-      "sha256": "84efc642bf78468584c45f2a4b1a0b99a2314a84adfa655d169184b5675b23ec"
+      "sha256": "63d7cd61cc9276cecd687242e28ba88e7059857e36b6b64ced92fa2e4885f9e5",
+      "digest": "canonical-json-sha256"
     }
   }
 }

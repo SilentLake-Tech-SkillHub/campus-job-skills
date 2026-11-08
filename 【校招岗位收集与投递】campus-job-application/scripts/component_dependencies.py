@@ -17,8 +17,9 @@ def load_contract(name,file=None):
     spec=dependency(name);target=Path(file) if file is not None else contract_path(name)
     try:data=target.read_bytes()
     except OSError as e:raise ValueError('COMPONENT_DEPENDENCY_MISSING: '+name+'; set '+spec['environment']+' to the declared owner file; run component_dependencies.py check') from e
-    if hashlib.sha256(data).hexdigest()!=spec['sha256']:raise ValueError('COMPONENT_DEPENDENCY_VERSION_MISMATCH: '+name)
     value=json.loads(data)
+    canonical=json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')
+    if hashlib.sha256(canonical).hexdigest()!=spec['sha256']:raise ValueError('COMPONENT_DEPENDENCY_VERSION_MISMATCH: '+name)
     if value.get('schemaVersion')!=spec['schemaVersion']:raise ValueError('COMPONENT_DEPENDENCY_SCHEMA_MISMATCH: '+name)
     return value
 
