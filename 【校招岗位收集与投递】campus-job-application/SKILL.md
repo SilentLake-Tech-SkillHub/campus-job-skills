@@ -64,3 +64,9 @@ metadata:
 ## 数据接口
 
 [招聘数据 MCP 与固定脚本](references/recruiting-data-mcp.md) 列出 MCP 工具与命令行的对应关系。接口调用成功不等于事实已查齐或用户已确认。
+
+## 独立业务入口与数据边界
+
+`python scripts/search_cli.py <operation> --workspace <工作区>` 从 stdin 读取 JSON，调用 `search_service.py` 的业务接口；`list` 列出操作。MCP 的 search_mcp.py 只适配参数和结果，每次通过同一 CLI 加载当前业务实现。队列、证据核验、阶段推进及主数据写入规则由核心及固定脚本执行。Agent 提供官方证据及选岗建议，用户完成规则要求的确认。
+
+`search_paths.py` 统一工作区及私有搜索目录，个人资料和运行结果在组件外；更新业务脚本后下次调用生效。MCP 接口本身的改动按接口部署处理。外部证据和队列使用既有固定目录，主数据只经 json_excel_sync.py，交接只经 company_store.py。
