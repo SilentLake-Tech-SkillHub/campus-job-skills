@@ -469,6 +469,42 @@ if __name__ == '__main__':
     unittest.main()
 
 class QuotedMaintenanceAuthorityTests(unittest.TestCase):
+    OPTIONS = """DSH 当前显示第 1 题，共 2 题。第 1 题的三个选项是：
+
+1. **先修模板数据，不改组件代码**（DSH 推荐）：重新采集控件、修复表单契约，再做真实交互测试和归档。
+2. **批准修改投递组件代码**：修复选项读回和重复栏目添加入口。
+3. **保留现状，由你在分身窗口核对**：页面称表单已填写、未提交，等你核对后再继续。
+
+我还没读取到第 2 题，不会替你选。"""
+
+    def test_forwarded_options_never_create_a_grant(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = {'session_id': 'current', 'hook_event_name': 'UserPromptSubmit',
+                       'prompt': self.OPTIONS}
+            hook.record_approval(root, payload)
+            self.assertFalse((root / hook.APPROVALS).exists())
+            self.assertFalse(hook.approved(root, payload))
+
+            payload['prompt'] += '\n\n我选择第 2 项，批准修改投递组件代码。'
+            hook.record_approval(root, payload)
+            self.assertTrue(hook.approved(root, payload))
+            original = (root / hook.APPROVALS).read_bytes()
+
+            payload['prompt'] = '下面是操作列表：\n- 收回授权\n- 继续等待'
+            hook.record_approval(root, payload)
+            self.assertEqual((root / hook.APPROVALS).read_bytes(), original)
+
+    def test_saved_option_cannot_unlock_component(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            record = {'current': {'userQuote': '2. **批准修改投递组件代码**：修复选项读回',
+                                  'expiresAt': hook.time.time() + 3600}}
+            payload = {'session_id': 'current', 'hook_event_name': 'PreToolUse', 'tool_name': 'Edit',
+                       'tool_input': {'file_path': str(root / '.agents/skills/job-application-assistant-v2/SKILL.md')}}
+            with patch.object(hook, '_load_approvals', return_value=record):
+                self.assertIn('组件只读', hook.component_violation(root, payload))
+
     def test_quoted_forwarded_and_example_approvals_are_not_authority(self):
         examples = [
             '下一步：新开一个对话，并在那个对话里说一句“批准修改组件”。',
@@ -481,6 +517,8 @@ class QuotedMaintenanceAuthorityTests(unittest.TestCase):
             '“批准修改组件”',
             '```text\n批准修改组件',
             '> 引用内容\n批准修改组件\n\n这里只是说明。',
+            '选项如下：\n一组选择\n- 方案 A\n- 方案 B\n  批准修改组件',
+            '2、批准修改组件',
         ]
         for prompt in examples:
             with self.subTest(prompt=prompt):

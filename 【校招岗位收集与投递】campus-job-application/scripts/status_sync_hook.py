@@ -369,19 +369,30 @@ APPROVAL_CONDITION = re.compile(r'如果|若(?!干)|假如|倘若|仅当|只有|
 RULE_SUBJECT = re.compile(r'^(?:由|经|须|需|请|待|等|当|在|若)?\s*用户')
 AFTER_THE_FACT = re.compile(r'后\s*[。；;！!]?$')
 APPROVAL_POST_CONDITION = re.compile(r'^\s*(?:(?:但|不过|且|同时|仅|只)\s*)?(?:前提|条件|必须|须|仅当|只有|除非|如果|若|待|等.{0,20}(?:后|再))')
+AUTHORITY_LIST_ITEM = re.compile(r'^[ \t]*(?:\d+[.)][ \t]+|\d+[、．）]|[-+*•][ \t]+)', re.M)
 
 
 def direct_authority_text(prompt):
-    """Quoted examples and forwarded blocks are data, never an instruction."""
+    """Exclude quoted material and list items before looking for an instruction."""
     text = re.sub(r'(?ms)^\s*(`{3,}|~{3,})[^\n]*\n.*?^\s*\1[^\n]*', '\n', prompt)
     text = re.sub(r'(?ms)^\s*(?:`{3,}|~{3,}).*$', '', text)
-    kept, quoted = [], False
+    kept, quoted, listed = [], False, False
     for line in text.splitlines():
         if not line.strip():
-            quoted = False; kept.append(line); continue
+            quoted = listed = False
+            kept.append(line)
+            continue
         if re.match(r'^\s*>', line):
             quoted = True
-        if not quoted: kept.append(line)
+        if quoted:
+            continue
+        if AUTHORITY_LIST_ITEM.match(line):
+            listed = True
+            continue
+        if listed and line.startswith((' ', '\t')):
+            continue
+        listed = False
+        kept.append(line)
     text = '\n'.join(kept)
     text = re.sub(r'`[^`]*`', '', text, flags=re.S)
     for opening, closing in [('“', '”'), ('‘', '’'), ('「', '」'), ('『', '』'), ('"', '"'), ("'", "'")]:
@@ -593,7 +604,10 @@ def record_approval(root, payload):
 def approved(root, payload):
     sid = _session(payload)
     v = _load_approvals(root).get(sid) if sid != '_no_session' else None
-    allowed = bool(v) and v.get('expiresAt', 0) > time.time()
+    # Prior versions could store an option line as the authorization quote.
+    # Reject it when checking permissions without modifying the approval ledger.
+    allowed = (bool(v) and v.get('expiresAt', 0) > time.time()
+               and not AUTHORITY_LIST_ITEM.search(v.get('userQuote', '')))
     _debug(root, payload.get('hook_event_name') or 'PreToolUse', payload, False,
            operation='check', authorizationSource='conversation_record', sessionRecorded=bool(v and 'approvedAt' in v), approved=bool(allowed))
     return allowed
