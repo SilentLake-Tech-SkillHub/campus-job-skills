@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from host_payload import (call_parts, _session, PROMPT_KEYS, _prompt, QUESTION_REPLY_TAG, QUESTION_REPLY,
-                          QUESTION_CALL_ID, _approval_prompts)
+                          QUESTION_CALL_ID, _approval_prompts, _submitted_prompt, codex_card_receipts)
 from hook_file_policy import (file_effects, path_at, touches, mentioned, text_only, PATH_KEYS,
                               blank_data_redirects, expand_vars, note_assignments)
 
@@ -534,7 +534,7 @@ def _save_approvals(root, data):
 
 
 def record_approval(root, payload):
-    """Only the host's user event may persist approval; ordinary reads never renew it."""
+    """Persist only submitted user authorization, keyed by a real session ID."""
     prompts = _approval_prompts(payload)
     _debug(root, 'UserPromptSubmit', payload, any(p.strip() for p in prompts))
     prompts = [without_injected_rules(root, p) for p in prompts]
@@ -545,20 +545,45 @@ def record_approval(root, payload):
     revoked = any(direct_revocation(p) for p in prompts)
     if not revoked and not approval_quotes:
         return '\n【组件软锁】本会话已获用户批准修改组件。' if approved(root, payload) else ''
+    if sid == '_no_session':
+        return '\n【组件软锁】缺少会话 ID，未登记组件授权。'
+    is_card = QUESTION_REPLY_TAG in _submitted_prompt(payload)
+    receipts = codex_card_receipts(root, payload, time.time(), APPROVAL_HOURS * 3600) if is_card else {}
+    if is_card and not receipts:
+        _debug(root, 'UserPromptSubmit', payload, True, saved=False, approvalSource='codex_card', error='UNVERIFIED_CARD_REQUEST')
+        return '\n【组件软锁】卡片答复未能核对同一会话的原始问答请求，未登记组件授权。'
     try:
         with _approval_lock(root):
             now = time.time()
-            data = {k: v for k, v in _load_approvals(root).items() if v.get('expiresAt', 0) > now}
+            if any(expiry <= now for expiry in receipts.values()):
+                return '\n【组件软锁】原始卡片请求已过期，未登记组件授权。'
+            data = _load_approvals(root)
+            for key, entry in list(data.items()):
+                seen = {card: expiry for card, expiry in entry.get('cardReceipts', {}).items() if expiry > now}
+                if entry.get('expiresAt', 0) <= now:
+                    if seen:
+                        data[key] = {'cardReceipts': seen}
+                    else:
+                        del data[key]
+                elif 'cardReceipts' in entry:
+                    entry['cardReceipts'] = seen
+            seen = data.get(sid, {}).get('cardReceipts', {})
+            if receipts.keys() & seen.keys():
+                return '\n【组件软锁】卡片答复已处理，授权记录和有效期未变。'
+            seen.update(receipts)
             if revoked:
                 data.pop(sid, None)
                 note = '\n【组件软锁】用户已收回本会话的组件修改批准，组件恢复只读。'
             else:
-                hours = 2 if sid == '_no_session' else APPROVAL_HOURS
-                data[sid] = {'userQuote': '\n'.join(approval_quotes)[:300], 'approvedAt': now, 'expiresAt': now + hours * 3600}
-                note = f'\n【组件软锁】已记录用户批准：本会话可以修改搜索组件、投递组件和 Hook 配置（{hours} 小时内有效，用户说“收回授权”即失效）。修改仍须按用户的具体要求进行，并逐项汇报。'
+                data[sid] = {'userQuote': '\n'.join(approval_quotes)[:300], 'approvedAt': now,
+                             'expiresAt': now + APPROVAL_HOURS * 3600}
+                note = f'\n【组件软锁】已记录用户批准：本会话可以修改搜索组件、投递组件和 Hook 配置（{APPROVAL_HOURS} 小时内有效，用户说“收回授权”即失效）。修改仍须按用户的具体要求进行，并逐项汇报。'
+            if seen:
+                data.setdefault(sid, {})['cardReceipts'] = seen
             digest = _save_approvals(root, data)
             _debug(root, 'UserPromptSubmit', payload, True, operation='revoke' if revoked else 'approve',
-                   saved=True, approvalSha256=digest, sessionRecorded=sid in data)
+                   saved=True, approvalSha256=digest, sessionRecorded=not revoked,
+                   approvalSource='codex_card' if is_card else 'user_prompt')
         return note + f'\n【批准保存核对】会话 {sid}；文件 {root / APPROVALS}；读回 SHA256 {digest}。'
     except OSError as error:
         _debug(root, 'UserPromptSubmit', payload, True, saved=False, error=str(error))
@@ -566,10 +591,11 @@ def record_approval(root, payload):
 
 
 def approved(root, payload):
-    v = _load_approvals(root).get(_session(payload))
+    sid = _session(payload)
+    v = _load_approvals(root).get(sid) if sid != '_no_session' else None
     allowed = bool(v) and v.get('expiresAt', 0) > time.time()
     _debug(root, payload.get('hook_event_name') or 'PreToolUse', payload, False,
-           operation='check', authorizationSource='conversation_record', sessionRecorded=bool(v), approved=bool(allowed))
+           operation='check', authorizationSource='conversation_record', sessionRecorded=bool(v and 'approvedAt' in v), approved=bool(allowed))
     return allowed
 
 
@@ -722,7 +748,7 @@ def main():
     except ValueError:
         payload = {}
     event = a.event or payload.get('hook_event_name') or ''
-    note = record_approval(root, payload) if event == 'UserPromptSubmit' else ''
+    note = record_approval(root, payload) if event == payload.get('hook_event_name') == 'UserPromptSubmit' else ''
     # 用户只关闭“写入 Excel 提醒”：该会话不再提示和拦截写入，但门禁规则、浏览器规则照常注入。
     reminders = sync_reminders_enabled(root, payload)
     if event in ('Stop', 'SubagentStop') and not reminders:

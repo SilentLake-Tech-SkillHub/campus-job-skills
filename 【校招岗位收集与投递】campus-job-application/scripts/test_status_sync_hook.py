@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import status_sync_hook as hook
@@ -240,24 +241,77 @@ class ComponentLockTests(unittest.TestCase):
         self.assertIn('组件只读', edit('s1') or '')
 
 class ApprovalAnswerParsingTests(unittest.TestCase):
-    def envelope(self, answers, question='是否允许修改组件？不要修改旧数据'):
-        items = [{'questionItemId': json.dumps(['request_user_input_async', 'call_test', i]),
+    def envelope(self, answers, question='是否允许修改组件？不要修改旧数据', call='call_test'):
+        items = [{'questionItemId': json.dumps(['request_user_input_async', call, i]),
                   'question': question, 'answer': answer} for i, answer in enumerate(answers)]
         return '<send_user_message_question_reply>\n' + json.dumps(items) + '\n</send_user_message_question_reply>'
+
+    def card_payload(self, root, prompt, sid='owner', age=0):
+        from host_payload import _card_answers
+        session_dir = (root / 'sessions').resolve()
+        session_dir.mkdir(exist_ok=True)
+        sessions_root = patch('host_payload.codex_sessions_root', return_value=session_dir)
+        sessions_root.start()
+        self.addCleanup(sessions_root.stop)
+        path = session_dir / (sid + '.jsonl')
+        if not path.exists():
+            path.write_text(json.dumps({'type':'session_meta','payload':{'id':sid,'cwd':str(root)}})+'\n', encoding='utf-8')
+        groups = {}
+        for call, index, question, _ in _card_answers(prompt):
+            groups.setdefault(call, {})[index] = {'title':question}
+        with path.open('a', encoding='utf-8') as stream:
+            for call, questions in groups.items():
+                stream.write(json.dumps({'type':'response_item','timestamp':(datetime.now(timezone.utc)-timedelta(seconds=age)).isoformat(),
+                    'payload':{'type':'function_call','name':'request_user_input_async','call_id':call,
+                    'arguments':json.dumps({'questions':[questions[i] for i in sorted(questions)]})}})+'\n')
+        return {'hook_event_name':'UserPromptSubmit','session_id':sid,'prompt':prompt,'transcript_path':str(path)}
 
     def test_only_actual_answers_are_scanned(self):
         prompt = self.envelope(['应届毕业生', '这5项留空', '批准修改组件'])
         self.assertEqual(hook._approval_prompts({'prompt': prompt}), ['应届毕业生', '这5项留空', '批准修改组件'])
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            payload = {'session_id': 'owner', 'prompt': prompt}
+            payload = self.card_payload(root, prompt)
             self.assertIn('已记录用户批准', hook.record_approval(root, payload))
             self.assertTrue(hook.approved(root, payload))
             self.assertFalse(hook.approved(root, {'session_id': 'other'}))
             quote = json.loads((root / hook.APPROVALS).read_text())['owner']['userQuote']
             self.assertEqual(quote, '批准修改组件')
-            hook.record_approval(root, {'session_id': 'owner', 'prompt': self.envelope(['批准修改组件', '收回授权'])})
+            revoke = self.card_payload(root, self.envelope(['批准修改组件', '收回授权'], call='call_revoke'))
+            hook.record_approval(root, revoke)
             self.assertFalse(hook.approved(root, payload))
+
+    def test_card_must_match_same_session_question_and_cannot_replay_after_revoke(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            payload=self.card_payload(root,self.envelope(['批准修改组件']))
+            for invalid in [{**payload,'session_id':'other'}, {**payload,'transcript_path':None},
+                            {**payload,'prompt':self.envelope(['批准修改组件'],question='替换题目')},
+                            {**payload,'prompt':self.envelope(['批准修改组件'],call='call_unknown')}]:
+                self.assertIn('未登记',hook.record_approval(root,invalid))
+                self.assertFalse((root/hook.APPROVALS).exists())
+            self.assertIn('批准保存核对',hook.record_approval(root,payload))
+            edit = {'hook_event_name':'PreToolUse','session_id':'owner','tool_name':'Edit',
+                    'tool_input':{'file_path':str(root/'.agents/skills/campus-job-application/SKILL.md')}}
+            self.assertIsNone(hook.component_violation(root,edit))
+            self.assertIn('组件只读',hook.component_violation(root,{**edit,'session_id':'other'}))
+            before=(root/hook.APPROVALS).read_bytes()
+            self.assertIn('已处理',hook.record_approval(root,payload))
+            self.assertEqual((root/hook.APPROVALS).read_bytes(),before)
+            hook.record_approval(root,{'session_id':'owner','prompt':'收回授权'})
+            self.assertIn('已处理',hook.record_approval(root,payload))
+            self.assertFalse(hook.approved(root,payload))
+            self.assertIn('组件只读',hook.component_violation(root,edit))
+
+    def test_expired_card_and_explicit_non_user_events_cannot_authorize(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            payload=self.card_payload(root,self.envelope(['批准修改组件']),age=hook.APPROVAL_HOURS*3600+1)
+            self.assertIn('未登记',hook.record_approval(root,payload))
+            for other in [{'session_id':'s','role':'assistant'}, {'session_id':'s','source':{'kind':'goal'}},
+                          {'session_id':'s','hook_event_name':'PostToolUse'}, {}]:
+                hook.record_approval(root,{'prompt':'批准修改组件',**other})
+            self.assertFalse((root/hook.APPROVALS).exists())
 
     def test_questions_and_nested_tool_text_never_authorize(self):
         for answer in ['不要修改组件', '是否批准修改组件', '', '否']:
@@ -316,10 +370,10 @@ class ApprovalAnswerParsingTests(unittest.TestCase):
                                question='不要修改组件；是否批准修改组件？')
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.assertIn('已记录用户批准', hook.record_approval(root, {'session_id': 'owner', 'prompt': prompt}))
+            self.assertIn('已记录用户批准', hook.record_approval(root, self.card_payload(root, prompt)))
             quote = json.loads((root / hook.APPROVALS).read_text())['owner']['userQuote']
             self.assertEqual(quote, '批准修改组件')
-            hook.record_approval(root, {'session_id': 'owner', 'prompt': self.envelope(['批准修改组件。是否有内置 browser？', '收回授权'])})
+            hook.record_approval(root, self.card_payload(root, self.envelope(['批准修改组件。是否有内置 browser？', '收回授权'], call='call_revoke')))
             self.assertFalse(hook.approved(root, {'session_id': 'owner'}))
 
     def test_malformed_envelopes_fail_closed(self):

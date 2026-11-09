@@ -4,7 +4,10 @@
 取会话标识、取用户本人发出的原话（含 Codex 问答回复格式）。新增宿主只改本文件，不改门禁规则。
 """
 import json
+import os
 import re
+from datetime import datetime
+from pathlib import Path
 
 
 def call_parts(payload):
@@ -59,14 +62,21 @@ QUESTION_REPLY = re.compile(r'\A<send_user_message_question_reply>\s*(.*?)\s*</s
 QUESTION_CALL_ID = re.compile(r'call_[A-Za-z0-9_-]+\Z')
 
 
-def _approval_prompts(payload):
-    """Read only the submitted user's text; quoted questions cannot grant or deny approval."""
-    prompt = next((payload[k] for k in PROMPT_KEYS
-                   if isinstance(payload.get(k), str) and payload[k].strip()), '')
-    if not prompt:
-        return []
-    if QUESTION_REPLY_TAG not in prompt:
-        return [prompt]
+def _submitted_prompt(payload):
+    if payload.get('hook_event_name', 'UserPromptSubmit') != 'UserPromptSubmit':
+        return ''
+    if payload.get('role', 'user') != 'user':
+        return ''
+    source = payload.get('source')
+    if isinstance(source, dict):
+        source = source.get('kind', source.get('type'))
+    if source not in (None, 'user'):
+        return ''
+    return next((payload[k] for k in PROMPT_KEYS
+                 if isinstance(payload.get(k), str) and payload[k].strip()), '')
+
+
+def _card_answers(prompt):
     match = QUESTION_REPLY.fullmatch(prompt.strip())
     if not match:
         return []
@@ -102,7 +112,63 @@ def _approval_prompts(payload):
             if key in seen:
                 return []
             seen.add(key)
-            answers.append(item['answer'])
+            answers.append((identity[1], identity[2], item['question'], item['answer']))
         return answers
     except (ValueError, TypeError, RecursionError):
         return []
+
+
+def _approval_prompts(payload):
+    """Parse submitted text. Card authorization additionally requires a verified request."""
+    prompt = _submitted_prompt(payload)
+    if not prompt:
+        return []
+    if QUESTION_REPLY_TAG in prompt:
+        return [answer for _, _, _, answer in _card_answers(prompt)]
+    return [prompt]
+
+
+def codex_sessions_root():
+    return (Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex') / 'sessions').resolve()
+
+
+def codex_card_receipts(root, payload, now, lifetime):
+    """Bind each card item to a recent native question in this workspace and session."""
+    answers = _card_answers(_submitted_prompt(payload))
+    transcript = payload.get('transcript_path')
+    if not answers or not isinstance(transcript, str) or not transcript:
+        return {}
+    try:
+        transcript = Path(transcript).resolve(strict=True)
+        if not transcript.is_relative_to(codex_sessions_root()) or transcript.suffix != '.jsonl':
+            return {}
+        with transcript.open(encoding='utf-8') as stream:
+            meta = json.loads(stream.readline())
+            session = meta['payload']
+            if (meta['type'] != 'session_meta' or session['id'] != _session(payload)
+                    or not Path(session['cwd']).resolve().is_relative_to(Path(root).resolve())):
+                return {}
+            requests = {}
+            wanted = {call for call, _, _, _ in answers}
+            for line in stream:
+                if '"function_call"' not in line or not any(call in line for call in wanted):
+                    continue
+                item = json.loads(line)
+                call = item.get('payload', {})
+                call_id = call.get('call_id')
+                if (item.get('type') != 'response_item' or call.get('type') != 'function_call'
+                        or call.get('name') != 'request_user_input_async' or call_id not in wanted):
+                    continue
+                issued = datetime.fromisoformat(item['timestamp'].replace('Z', '+00:00')).timestamp()
+                if not 0 <= now - issued < lifetime or call_id in requests:
+                    return {}
+                requests[call_id] = (json.loads(call['arguments'])['questions'], issued + lifetime)
+        receipts = {}
+        for call_id, index, question, _ in answers:
+            questions, expires = requests[call_id]
+            if questions[index]['title'] != question:
+                return {}
+            receipts[f'{call_id}:{index}'] = expires
+        return receipts
+    except (OSError, ValueError, TypeError, KeyError, IndexError, OverflowError, AttributeError):
+        return {}

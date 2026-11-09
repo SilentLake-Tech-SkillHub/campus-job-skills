@@ -29,3 +29,7 @@
 ## 共享规则依赖
 
 文字工具及文件参数的唯一定义由投递组件hooks/tool-arguments.json维护，依赖版本、内容指纹及源路径声明于component-dependencies.json。component_dependencies.py统一解析；工作区安装可直接读取相邻的已安装投递组件，独立安装通过RECRUITING_TOOL_ARGUMENTS_FILE指定原仓库的规则路径，或在声明的checkoutPath检出固定版本。安装和CI先运行component_dependencies.py check。不得复制规则文件、维护第二份列表或放宽缺依赖时的保护行为；规则变更须更新依赖声明并验证两个消费者。
+
+## 组件维护授权的宿主答复
+
+普通回复走宿主UserPromptSubmit并绑定会话。Codex异步卡片还须从同会话的宿主会话记录核对真实问答请求、题目位置和标题。卡片标记随现有批准记录原子保存，重复答复不续期，撤回后也不能靠重放恢复。没有明确会话ID或无法核对卡片请求时，Hook报告未登记。Agent从一开始对只提供工具结果的宿主用普通聊天收集授权。授权记录由Hook写入，后续PreToolUse独立读取。
