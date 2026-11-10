@@ -13,7 +13,7 @@
 | 岗位编码、站点编码、投递链接、志愿顺序、城市选项 | 地区岗位表同一行 | 编码由脚本分配、锁定；投递链接用 `set-apply-link` 或 `apply-observations`，志愿顺序用 `company_store.py set-order` |
 | 每家公司的交接宽表（主表投影 + 本轮「批次」：选岗、确认、进度） | `岗位交接/公司/<公司编码>.json` | 只由 `company_store.py refresh / forward / forward-confirm / amend-materials / apply-observations / reverse-confirm` 写 |
 | 各站点登录配置、表单定义（过渡，第 2 步迁入登录模块） | `岗位交接/公司/<地区>/<公司>/登录[@域名].json`、`表单定义[@域名].json` | 投递组件建档 |
-| 正向评审页 | `岗位交接/正向评审.html` | `company_store.py forward` |
+| 正向交接清单 | 当前对话回复 | `company_store.py forward` 返回公司、岗位与排除原因 |
 | 本轮一次性投递需求 | `产品管理/user_applicaiton_requirements_temp.json` | `application_requirements.py set` 覆盖写入；forward成功后立即清空，完成时检查 |
 | 投递结果与链接观察回传、反向评审页 | `岗位交接/投递回传.json`（按编码）、`岗位交接/反向评审.html` | 投递组件 `application_closeout` / 链接观察；`company_store.py reverse / reverse-confirm / apply-observations` |
 | 状态变更确认 | `产品管理/投递状态变更确认.json`（每行只留最近一次） | 只由 `confirm` / `reset-rows` 写 |

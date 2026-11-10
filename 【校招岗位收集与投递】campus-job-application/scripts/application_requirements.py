@@ -238,7 +238,7 @@ class Requirements:
             doc = self.document(current)
             req = doc.get('requirements', {})
             result = builder(req)
-            # Clear only after both fixed batch and review writes succeeded.
+            # Clear only after the fixed batch writes and response construction succeed.
             save(self.temp, {})
             current.update(active=True, phase='default', lastBatchId=result['batchId'])
             save(self.state, state)

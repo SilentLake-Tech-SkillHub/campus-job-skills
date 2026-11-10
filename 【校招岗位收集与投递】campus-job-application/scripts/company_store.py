@@ -87,14 +87,6 @@ def role_materials(values, role_code):
     return {'schemaVersion': 2, 'items': items}
 
 
-def material_summary(role):
-    labels = {d['key']: d['label'] for d in material_definitions()}
-    return '；'.join(labels.get(item['key'], item['key']) + '：' + (
-        item['value'] + '（有则必填）' if item['status'] == 'available'
-        else '无已记录' if item['status'] == 'absent' else '待核实')
-        for item in (role.get('材料') or {}).get('items', []))
-
-
 def handoff_view(doc):
     """内容指纹覆盖的范围：本批选中岗位的执行字段 + 它们所在站点。投递组件 handoffView 与此一致。"""
     batch = doc.get('批次') or {}
@@ -141,7 +133,6 @@ class Store:
         cfg = self.ctx.cfg.get('companyStore', {})
         self.base = self.root / cfg.get('dir', '岗位交接/公司')
         self.handoff = self.base.parent
-        self.review_file = self.root / cfg.get('forwardReview', '岗位交接/正向评审.html')
         self.outcome_file = self.handoff / '投递回传.json'
         self.third_party = [h.lower() for h in cfg.get('thirdPartyHosts', [])]
 
@@ -407,11 +398,11 @@ class Store:
             summary['companies'] += bool(ok)
             summary['roles'] += len(ok)
             summary['excluded'] += len(excluded)
-        self.review(batch_id)
+        summary.update(self.forward_summary(batch_id))
         from browser_capabilities import application_policy_file
         from application_requirements import save as save_execution_policy
         save_execution_policy(application_policy_file(self.root), {'batchId': batch_id, 'browserChannels': browser_channels, 'authorizationRef': 'forward_requirements'})
-        return {'batchId': batch_id, **summary, 'browserChannels': browser_channels, 'review': str(self.review_file.relative_to(self.root))}
+        return {'batchId': batch_id, **summary, 'browserChannels': browser_channels}
 
     def _fresh_view_matches(self, master, rows, doc):
         """确认前核对：用当前主表重建的执行内容与文件里的一致（用户看到的就是要确认的）。"""
@@ -468,31 +459,22 @@ class Store:
             self.save(d)
             if verify_handoff(json.loads(self.file(code).read_text(encoding='utf-8'))):
                 raise ValueError('补充材料后批次确认读回失败')
-        self.review(batch_id)
         return preview
 
-    # ---------- 评审页 ----------
-    def review(self, batch_id):
-        docs = {c: d for c, d in self.docs().items() if (d.get('批次') or {}).get('批次编号') == batch_id}
-        by_code = lambda d: {r['岗位编码']: r for r in d['岗位']}
-        handed = [d for d in docs.values() if d['批次']['选中岗位']]
-        rows = ''.join(
-            f"<tr><td>{html.escape(d['公司名称'])}（{d['公司编码']}）</td><td>{html.escape(d['批次']['状态'])}</td>"
-            f"<td>{'<br>'.join(html.escape(('' if r['志愿分组'] == '公司' else r['志愿分组'] + '｜') + ('第' + str(r['志愿顺序']) + '志愿｜' if r.get('志愿顺序') else '') + str(r['岗位名称']) + '（' + r['岗位编码'] + '）' + ('（链接例外：' + str(r['链接说明']) + '）' if r.get('链接说明') else '') + '｜' + material_summary(r)) for r in (by_code(d)[j] for j in d['批次']['选中岗位']))}</td></tr>"
-            for d in handed)
-        ex = ''.join(f"<tr><td>{html.escape(d['公司名称'])}</td><td>{html.escape(str(e.get('岗位', '')))}（{e.get('岗位编码', '')}）</td>"
-                     f"<td>{html.escape(e['原因'])}</td></tr>" for d in docs.values() for e in d['批次'].get('排除') or [])
-        n_ex = sum(len(d['批次'].get('排除') or []) for d in docs.values())
-        page = f"""<!doctype html><html lang=zh><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>正向评审</title>
-<style>body{{font:14px/1.5 -apple-system,"PingFang SC",sans-serif;margin:16px;max-width:1100px}}table{{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0 20px}}td,th{{border-top:1px solid #e5e5e5;padding:5px 6px;text-align:left;vertical-align:top}}th{{background:#f5f5f5}}</style>
-<h1>正向评审 · 批次 {html.escape(batch_id)}</h1>
-<p>生成时间：{html.escape(now())} · 可交接 {len(handed)} 家、{sum(len(d['批次']['选中岗位']) for d in handed)} 个岗位；不交接 {n_ex} 项。</p>
-<h2>交接给投递组件</h2><table><tr><th>公司</th><th>状态</th><th>岗位</th></tr>{rows}</table>
-<h2>本批不交接（需先处理）</h2><table><tr><th>公司</th><th>岗位</th><th>原因</th></tr>{ex}</table></html>"""
-        self.review_file.parent.mkdir(parents=True, exist_ok=True)
-        self.review_file.write_text(page, encoding='utf-8')
-        if self.review_file.read_text(encoding='utf-8') != page:
-            raise ValueError('正向评审写入后读回不一致')
+    def forward_summary(self, batch_id):
+        """将当前批次清单直接返回给调用方。"""
+        docs = [d for d in self.docs().values() if (d.get('批次') or {}).get('批次编号') == batch_id]
+        companies, exclusions = [], []
+        for doc in sorted(docs, key=lambda d: d['批次']['公司顺序']):
+            company = {'公司编码': doc['公司编码'], '公司名称': doc['公司名称']}
+            batch = doc['批次']
+            by_code = {r['岗位编码']: r for r in doc['岗位']}
+            roles = [{k: by_code[j][k] for k in ('岗位编码', '岗位名称', '志愿分组', '志愿顺序', '链接说明')}
+                     for j in batch['选中岗位']]
+            if roles:
+                companies.append({**company, '状态': batch['状态'], '岗位': roles})
+            exclusions.extend({**company, **item} for item in batch.get('排除') or [])
+        return {'handoffCompanies': companies, 'excludedRoles': exclusions}
 
     # ---------- 投递回传 ----------
     def outcomes(self):
@@ -575,8 +557,6 @@ class Store:
                {(c, f) for c, v in sites.items() for f in v if f != 'code'}
         out['observations'] = [o for o in obs if (o['code'], o['field']) not in done]
         self.save_outcomes(out)
-        if batch_id:
-            self.review(batch_id)
         return {'applied': len(done), 'companiesRefreshed': affected, 'show_user_exactly': lines, 'waiting_for_new_link': info}
 
     def reverse(self):
@@ -632,30 +612,45 @@ class Store:
                 raise SystemExit(f"{d['公司名称']} 的投递批次在确认后被改动，须重新正向评审")
         items, notes, roles = self._reverse_items()
         if items:
-            S.confirm(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], quote.strip(), f'反向评审 {batch_id}')
+            S.confirm(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], quote.strip(), f'反向评审 {batch_id}', refresh_handoff=False)
         done = {i['outcomeKey'] for i in items} | {n['key'] for n in notes if n['event'] not in UNRESOLVED} | set(resolved)
         left = {k: v for k, v in roles.items() if k not in done}
         out = self.outcomes()
         out['roles'] = left
         self.save_outcomes(out)
-        master = self.ctx.load_master()
-        status = {r['values'].get(M.ROLE_CODE_COL): r['values'].get(self.ctx.column) for rs in self.master_rows(master).values() for r in rs if r['kind'] == 'role'}
-        at, summary = now(), {}
-        for code, d in live.items():
-            b = d['批次']
-            processed = set((b.get('进度') or {}).get('已处理') or []) | (done & set(b['选中岗位']))
-            pending = [j for j in b['选中岗位'] if j not in processed and status.get(j) in ('岗位待投递', '岗位待筛选', None, '')]
-            unresolved = [j for j in b['选中岗位'] if j in left]
-            b['进度'] = {'已处理': sorted(processed), '待投递': sorted(pending)}
-            b['状态'] = '等待反向评审' if unresolved else '进行中' if pending else '已回写'
-            b['更新时间'] = at
-            self.save(d)
-            summary[code] = b['状态']
-        self.refresh(sorted(live))
-        if self.round()[0] is None:  # 本轮各家都已回写
-            from application_requirements import Requirements
-            Requirements(self.root).complete(batch_id)
+        summary = self.refresh_confirmed_statuses(live, done, left, batch_id)
         return {'batchId': batch_id, 'companies': summary, 'statusChanges': len(items), 'unresolved': sorted(left)}
+
+    def refresh_confirmed_statuses(self, codes, done=(), unresolved=None, batch_id=None):
+        """从主表更新受影响公司的宽表及本轮执行进度。"""
+        docs = self.docs()
+        codes = sorted(set(codes) & docs.keys())
+        if not codes:
+            return {}
+        master = self.ctx.load_master()
+        rows = self.master_rows(master)
+        unresolved = self.outcomes().get('roles', {}) if unresolved is None else unresolved
+        at, summary, batches = now(), {}, set()
+        for code in codes:
+            doc = self.build(master, code, rows.get(code, []), docs[code])
+            batch = doc.get('批次') or {}
+            if batch.get('状态') in ACTIVE:
+                batches.add(batch['批次编号'])
+                selected = batch['选中岗位']
+                status = {r['岗位编码']: r['投递状态'] for r in doc['岗位']}
+                processed = set((batch.get('进度') or {}).get('已处理') or [])
+                processed.update(j for j in selected if j in done or status.get(j) in ('岗位已投递', '岗位失效/关闭'))
+                pending = [j for j in selected if j not in processed and status.get(j) in ('岗位待投递', '岗位待筛选', None, '')]
+                batch['进度'] = {'已处理': sorted(processed), '待投递': pending}
+                batch['状态'] = ('等待反向评审' if any(j in unresolved for j in selected)
+                               else '进行中' if pending else '已回写')
+                batch['更新时间'] = at
+                summary[code] = batch['状态']
+            self.save(doc)
+        if (batch_id or batches) and self.round()[0] is None:
+            from application_requirements import Requirements
+            Requirements(self.root).complete(batch_id or next(iter(batches)))
+        return summary
 
     def batch_status(self):
         batch_id, docs = self.round()
@@ -682,7 +677,8 @@ def main():
     ap.add_argument('--session', help='当前宿主会话身份，默认使用宿主环境')
     ap.add_argument('--turn', help='当前宿主回合身份，默认读取需求Hook上下文')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    sub.add_parser('refresh')
+    p = sub.add_parser('refresh')
+    p.add_argument('--company', action='append', help='按公司编码从主表刷新宽表与已确认投递进度')
     sub.add_parser('forward')
     p = sub.add_parser('amend-materials')
     p.add_argument('--quote', help='不传则仅预览；传用户明确授权原话后只补当前岗位材料')
@@ -705,7 +701,7 @@ def main():
     st = Store(a.workspace, a.labels)
     if a.cmd == 'refresh':
         with S.exclusive(st.ctx):
-            out = st.refresh()
+            out = {'companies': st.refresh_confirmed_statuses(a.company)} if a.company else st.refresh()
     elif a.cmd == 'forward':
         with S.exclusive(st.ctx):
             out = st.forward(a.session, a.turn)

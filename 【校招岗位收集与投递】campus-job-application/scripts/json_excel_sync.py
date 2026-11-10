@@ -1095,7 +1095,7 @@ def quota_closure(ctx, master):
     return derived, over
 
 
-def confirm(ctx, items, quote, ref):
+def confirm(ctx, items, quote, ref, *, refresh_handoff=True):
     if not quote or not quote.strip():
         raise SystemExit('必须提供用户确认原话')
     master = ctx.load_master()
@@ -1124,6 +1124,17 @@ def confirm(ctx, items, quote, ref):
     refresh_digest(master)
     save_master(ctx, master)
     save_json(ctx.ledger_path, ledger)
+    if refresh_handoff:
+        companies = set()
+        for item in items:
+            if item['to'] not in ('岗位已投递', '岗位失效/关闭'):
+                continue
+            key = resolve_key(ctx, master, item)
+            _, idx, row = find_row(ctx, master, key)
+            companies.add(cell_value(row, idx[M.COMPANY_CODE_COL]))
+        if companies:
+            from company_store import Store
+            Store(ctx.root, ctx.labels_path).refresh_confirmed_statuses(companies)
     return {'confirmed': len(plan), 'quota_closure_changes': [p['text'] for p in derived], 'excel_written': False,
             'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
 

@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company search in this project — work through the master JSON's 待搜索 queue (or companies the user names), verify official plans and in-scope roles, write results only through the fixed script, get user confirmation for every status change, and hand confirmed roles to the application component through forward review. It never fills or submits applications.
 metadata:
-  version: "2.1.8"
+  version: "2.1.9"
 ---
 
 # 校招岗位搜索与主表维护
@@ -59,7 +59,7 @@ metadata:
 
 ## 交给投递组件
 
-选岗由用户决定。用户确认“岗位待投递”后，按 [本轮需求入口](references/application-requirements.md) 从临时表取范围，再按 [正向评审与反向评审](references/company-review-handoff.md) 在各公司宽表里生成本轮「批次」和正向评审页，用户逐家确认后才交给投递组件；投递结果经反向评审、用户确认后才写回主表。本 Skill 不填表、不上传简历、不提交申请。
+选岗由用户决定。用户确认“岗位待投递”后，按 [本轮需求入口](references/application-requirements.md) 从临时表取范围，再按 [正向评审与反向评审](references/company-review-handoff.md) 在各公司宽表里生成本轮「批次」，把返回的交接清单直接在对话回复，用户确认后交给投递组件。确认投递结果后回刷主表及相关公司宽表与批次进度。本 Skill 不填表、不上传简历、不提交申请。
 
 ## 数据接口
 

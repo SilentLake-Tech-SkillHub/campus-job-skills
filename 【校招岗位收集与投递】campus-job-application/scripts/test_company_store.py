@@ -251,6 +251,14 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertIn('被改动', self.run_cmd('batch-status')['companies']['C00001']['handoffProblem'])
         self.assertNotEqual(self.run_cmd('forward', ok=False).returncode, 0)
 
+    def test_direct_submission_confirmation_refreshes_handoff_progress(self):
+        self.handed()
+        self.sync('confirm', '--input', self.write('c.json', [{"code": J_AI, "to": "岗位已投递"}]), '--quote', '确认已投递')
+        doc = self.doc()
+        self.assertEqual(next(r['投递状态'] for r in doc['岗位'] if r['岗位编码'] == J_AI), '岗位已投递')
+        self.assertIn(J_AI, doc['批次']['进度']['已处理'])
+        self.assertNotIn(J_AI, doc['批次']['进度']['待投递'])
+
     def test_status_changes_elsewhere_do_not_break_the_confirmation(self):
         """内容指纹只覆盖执行内容：主表里改投递状态、JD 等不让已确认的交接失效。"""
         self.handed()
@@ -267,12 +275,15 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual({e['岗位编码']: e['原因'] for e in self.doc()['批次']['排除']}[J_AI], C.LIST_PAGE_PROBLEM)
         self.sync('link-exception', '--input', self.write('in.json', [{"code": J_AI, "定位说明": "列表页按 positionId 定位，点岗位名展开 JD"}]),
                   '--quote', '官网没有详情页，这个可以')
-        self.run_cmd('forward')
+        result = self.run_cmd('forward')
         jia = self.doc()
         by = {r['岗位编码']: r for r in jia['岗位']}
         self.assertEqual([(by[j]['岗位名称'], by[j]['官方岗位ID'], by[j]['链接说明']) for j in jia['批次']['选中岗位']],
                          [('游戏产品', '778899', None), ('AI产品经理', '123456', '列表页按 positionId 定位，点岗位名展开 JD')])
-        self.assertIn('链接例外：列表页按 positionId 定位', (self.root / '岗位交接/正向评审.html').read_text(encoding='utf-8'))
+        roles = result['handoffCompanies'][0]['岗位']
+        self.assertEqual([r['岗位编码'] for r in roles], jia['批次']['选中岗位'])
+        self.assertIn('列表页按 positionId 定位', next(r['链接说明'] for r in roles if r['岗位编码'] == J_AI))
+        self.assertFalse((self.root / '岗位交接/正向评审.html').exists())
 
     def test_confirmations_are_kept_per_scope(self):
         self.handed()

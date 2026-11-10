@@ -57,7 +57,7 @@ def recruiting_application_requirements_set(requirements:dict,user_quote:str,ses
 
 @operation
 def recruiting_application_forward(session_id:str|None=None,turn_id:str|None=None)->dict:
-    """读取一次性需求生成当前正向评审；无公司参数默认取最新十家。成功后清空需求表，失败保留，仍须用户确认正向评审。"""
+    """读取一次性需求生成正向交接清单并直接返回；无公司参数默认取最新十家。成功后清空需求表，失败保留。"""
     args=[]
     if session_id:args+=['--session',session_id]
     if turn_id:args+=['--turn',turn_id]
@@ -89,7 +89,7 @@ def recruiting_status_propose(items:list[dict])->dict:
 
 @operation
 def recruiting_status_confirm(items:list[dict],user_quote:str,confirmation_ref:str='')->dict:
-    """用户明确确认 propose 展示的变更后调用：记入确认台账并更新主数据 JSON，不写 Excel。"""
+    """用户明确确认 propose 展示的变更后调用：记入确认台账并更新主数据 JSON。完成投递或关闭岗位时回刷相关公司宽表与批次进度。"""
     return run_sync('confirm','--quote',user_quote,'--ref',confirmation_ref,items=items)
 
 
