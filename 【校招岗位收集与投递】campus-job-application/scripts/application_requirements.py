@@ -256,9 +256,24 @@ class Requirements:
                     'newerRequirementsPreserved': bool(read(self.temp))}
 
 
+def outside_project(root, payload):
+    """会话工作目录不在本项目时返回 True；宿主没带 cwd 时按本项目处理（投递任务单 C37）。"""
+    cwd = payload.get('cwd')
+    if not cwd:
+        return False
+    try:
+        here, base = Path(str(cwd)).expanduser().resolve(), Path(root).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return here != base and base not in here.parents
+
+
 def prompt_hook(root, payload):
     event = payload.get('hook_event_name') or ''
     if event not in ('UserPromptSubmit', 'SessionStart', 'PreInvocation'):
+        return {}
+    # Hook 对本项目生效，跨项目不生效：别的项目的会话不注入、不写本项目的需求状态。
+    if outside_project(root, payload):
         return {}
     session = payload.get('session_id') or payload.get('sessionId') or payload.get('conversation_id') or payload.get('conversationId')
     if not session:

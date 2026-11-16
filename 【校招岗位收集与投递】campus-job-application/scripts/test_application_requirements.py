@@ -99,6 +99,20 @@ class RequirementsTests(unittest.TestCase):
         self.assertEqual(R.prompt_hook(self.root, payload), {})
         self.assertTrue(R.Requirements(self.root, 'session-a').begin()['askUserRequirements'])
 
+    def test_hook_does_not_act_in_other_projects(self):
+        """Hook 对本项目生效、跨项目不生效（投递任务单 C37）。"""
+        self.store.begin()
+        self.store.set({}, '默认')
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        before = self.store.state.read_text(encoding='utf-8')
+        payload = {'hook_event_name': 'UserPromptSubmit', 'session_id': 'session-a', 'turn_id': 'turn-2', 'cwd': other.name}
+        self.assertEqual(R.prompt_hook(self.root, payload), {})
+        self.assertEqual(self.store.state.read_text(encoding='utf-8'), before)
+        (self.root / 'sub').mkdir()
+        self.assertIn('新用户回合', R.prompt_hook(self.root, {**payload, 'cwd': str(self.root / 'sub')})['hookSpecificOutput']['additionalContext'])
+        self.assertIn('新用户回合', R.prompt_hook(self.root, {**payload, 'cwd': None, 'turn_id': 'turn-3'})['hookSpecificOutput']['additionalContext'])
+
     def test_invalid_or_corrupt_request_never_silently_becomes_default(self):
         with self.assertRaisesRegex(ValueError, '重复'):
             self.store.set({'公司': ['甲公司', '甲公司']}, '甲公司')

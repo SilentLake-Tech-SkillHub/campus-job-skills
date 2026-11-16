@@ -42,6 +42,7 @@ for _stream in (sys.stdout, sys.stderr):
 import uuid
 from datetime import date, datetime, time, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from openpyxl import load_workbook
 from openpyxl.comments import Comment
@@ -1442,13 +1443,95 @@ def migrate_login_configs(ctx, expected_sha=None, quote=None, remove_legacy=Fals
     return {**result, 'migrated': len(sources)}
 
 
+def create_site_login_config(ctx, master, company, site, config, quote, expected_sha):
+    """为从未建过登录配置的站点建立首版配置：只接受本人登录的最小契约。
+
+    2026-11-13 用户决定首版配置由投递组件按固定规则直接写入（“组件直接写入，接着投递原岗位，事后在结果里告诉你写了哪几家”）：
+    confirmation 只能是 mode=component_first_config 并附组件写入规则；--quote 传该规则原文，--expect-sha 为整条写入内容的指纹。"""
+    sites = M.sites(master)
+    site_row = sites.get(site)
+    if not site_row or site_row['公司编码'] != company:
+        raise SystemExit(f'站点 {site} 不属于公司 {company}')
+    if not quote or not quote.strip():
+        raise SystemExit('首版登录配置必须附组件写入规则')
+    fingerprint = hashlib.sha256(json.dumps({'company': company, 'site': site, 'config': config},
+                                           ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    if expected_sha != fingerprint:
+        raise SystemExit('首版登录配置的预览指纹与当前内容不一致')
+    origin = str(site_row['站点'])
+    if config.get('schemaVersion') != 1 or config.get('companyId') != company or not isinstance(config.get('version'), int) or config['version'] < 1:
+        raise SystemExit('首版登录配置的基本字段不合法')
+    if str(config.get('origin')) != origin or not str(config.get('loginPath') or '').startswith('/'):
+        raise SystemExit('首版登录配置的域名或登录路径不合法')
+    if not config.get('allowedPaths') or not all(str(p).startswith('/') for p in config['allowedPaths']):
+        raise SystemExit('首版登录配置必须登记允许访问的路径')
+    if config.get('loginMethod') != 'user_operated' or (config.get('success') or {}).get('noApplicationSubmission') is not True:
+        raise SystemExit('首版登录配置只接受本人登录的最小契约')
+    source_url = str((config.get('evidence') or {}).get('sourceUrl') or '')
+    if not source_url or M.origin(source_url) != origin:
+        raise SystemExit('首版登录配置缺少同域名的页面证据')
+    confirmation = config.get('confirmation') or {}
+    if (config.get('version') != 1 or confirmation.get('mode') != 'component_first_config'
+            or confirmation.get('rule') != quote.strip() or not confirmation.get('confirmedAt')):
+        raise SystemExit('首版登录配置的写入记录与版本不一致')
+    if any(key in config for key in ('entry', 'account', 'fields', 'popups', 'challenge')):
+        raise SystemExit('首版登录配置只接受本人登录的最小契约')
+    master.setdefault('login_configs', {}).setdefault(company, {})[site] = config
+    save_json(ctx.master, master)
+    return {'written': True, 'created': True, 'company': company, 'site': site, 'fingerprint': fingerprint}
+
+
+def _path_covered(path, prefixes):
+    return any(str(path).startswith(str(p)) for p in prefixes)
+
+
+def add_first_site_entry(ctx, master, company, site, current, config, quote, expected_sha):
+    """为还没有入口配置的站点写入首版入口配置（C39）。
+
+    2026-11-16 用户决定（“2.同意 3A”）：和首版登录配置一样，投递组件读出岗位标题和投递按钮，直接写入第一版，
+    接着点一次入口。confirmation 只能是 mode=component_first_entry 并附组件写入规则；--quote 传该规则原文，
+    --expect-sha 为当前配置的指纹。只加 entry；申请页不在允许路径内时允许路径可放宽，但必须覆盖原有路径和申请页。"""
+    if 'entry' in current:
+        raise SystemExit('站点已有入口配置；改动须经 site-entry 预览并由用户确认')
+    if not quote or not quote.strip():
+        raise SystemExit('首版入口配置必须附组件写入规则')
+    if expected_sha != hashlib.sha256(json.dumps(current, ensure_ascii=False, sort_keys=True).encode()).hexdigest():
+        raise SystemExit('首版入口配置的预览指纹与当前配置不一致')
+    changed = {key for key in current.keys() | config.keys() if current.get(key) != config.get(key)}
+    if not changed <= {'entry', 'allowedPaths', 'version', 'confirmation'} or 'entry' not in changed:
+        raise SystemExit('首版入口配置只允许新增入口并按规则放宽允许路径')
+    confirmation = config.get('confirmation') or {}
+    if (config.get('version') != current.get('version', 1) + 1 or confirmation.get('rule') != quote.strip()
+            or not confirmation.get('confirmedAt')):
+        raise SystemExit('首版入口配置的写入记录与版本不一致')
+    entry = config.get('entry') or {}
+    evidence = entry.get('evidence') or {}
+    origin = str(current.get('origin'))
+    if entry.get('kind') != 'declarative_transition' or entry.get('target') not in ('same', 'new'):
+        raise SystemExit('首版入口配置只接受组件观察到的声明式入口')
+    if M.origin(str(evidence.get('detailUrl') or '')) != origin or M.origin(str(evidence.get('formUrl') or '')) != origin:
+        raise SystemExit('首版入口配置缺少同域名的岗位页与申请页证据')
+    paths = config.get('allowedPaths') or []
+    if (not paths or not all(str(p).startswith('/') for p in paths)
+            or not all(_path_covered(p, paths) for p in current.get('allowedPaths') or [])
+            or not _path_covered(urlparse(str(evidence['formUrl'])).path, paths)):
+        raise SystemExit('首版入口配置的允许路径必须覆盖原有路径和申请页')
+    master['login_configs'][company][site] = config
+    save_json(ctx.master, master)
+    return {'written': True, 'entryCreated': True, 'company': company, 'site': site}
+
+
 def set_site_login_config(ctx, item, quote, expected_sha):
     """Write an approved site-entry change through the master write lock."""
     master = ctx.load_master()
     company, site = item['company'], item['site']
     current = master.get('login_configs', {}).get(company, {}).get(site)
     next_config = item['config']
-    if current is None or not quote or not quote.strip() or expected_sha != hashlib.sha256(json.dumps(current, ensure_ascii=False, sort_keys=True).encode()).hexdigest():
+    if current is None:
+        return create_site_login_config(ctx, master, company, site, next_config, quote, expected_sha)
+    if (next_config.get('confirmation') or {}).get('mode') == 'component_first_entry':
+        return add_first_site_entry(ctx, master, company, site, current, next_config, quote, expected_sha)
+    if not quote or not quote.strip() or expected_sha != hashlib.sha256(json.dumps(current, ensure_ascii=False, sort_keys=True).encode()).hexdigest():
         raise SystemExit('登录配置缺少当前预览指纹或用户确认')
     changed = {key for key in current.keys() | next_config.keys() if current.get(key) != next_config.get(key)}
     if not changed <= {'entry', 'loginPath', 'version', 'confirmation'}:

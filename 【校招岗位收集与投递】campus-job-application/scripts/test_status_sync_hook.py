@@ -431,6 +431,21 @@ class ConversationReminderTests(unittest.TestCase):
             self.assertFalse(pending, event)
             self.assertFalse(sync, event)
 
+    def test_other_project_session_gets_no_injection_or_stop_block(self):
+        """Hook 对本项目生效、跨项目不生效：别的项目的会话不注入、不做收尾阻断（投递任务单 C37）。"""
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        for event in ('UserPromptSubmit', 'SessionStart', 'Stop', 'SubagentStop'):
+            result, pending, sync, approval = self.invoke(event, 'search-session', cwd=other.name)
+            self.assertEqual(result, {}, event)
+            self.assertFalse(pending or sync or approval, event)
+        result, pending, _, _ = self.invoke('UserPromptSubmit', 'search-session', cwd=str(self.root))
+        self.assertEqual(result['hookSpecificOutput']['additionalContext'], 'RULESBROWSERPENDING')
+        root = self.root.resolve()
+        self.assertTrue(hook._outside_workspace(root, {'cwd': other.name}))
+        self.assertFalse(hook._outside_workspace(root, {'cwd': str(root / 'sub')}))
+        self.assertFalse(hook._outside_workspace(root, {}))
+
     def test_other_session_keeps_startup_reminder_and_stop_block(self):
         result, pending, _, _ = self.invoke('UserPromptSubmit', 'search-session')
         self.assertEqual(result['hookSpecificOutput']['additionalContext'], 'RULESBROWSERPENDING')

@@ -749,6 +749,23 @@ def component_violation(root, payload):
             f'或由用户本人把 {SWITCH} 的“开启”改为 true。被拦截：' + '、'.join(bad[:5]))
 
 
+def _outside_workspace(root, payload):
+    """会话工作区不在本工作区时返回 True。
+
+    DSH 把本 Hook 挂在全局 profile 上，别的项目会话也会触发；这些会话不该收到
+    本工作区的门禁注入，也不该在收尾时被“现在写入还是下一轮”阻断。
+    宿主没带 cwd 时按本工作区处理，保持原有行为。
+    """
+    cwd = payload.get('cwd')
+    if not cwd:
+        return False
+    try:
+        here = Path(str(cwd)).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return here != root and root not in here.parents
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--workspace', required=True)
@@ -762,6 +779,10 @@ def main():
     except ValueError:
         payload = {}
     event = a.event or payload.get('hook_event_name') or ''
+    # 写入保护（PreToolUse）全局生效；注入与收尾阻断只在本工作区的会话里发生。
+    if event != 'PreToolUse' and _outside_workspace(root, payload):
+        emit({})
+        return 0
     note = record_approval(root, payload) if event == payload.get('hook_event_name') == 'UserPromptSubmit' else ''
     # 用户只关闭“写入 Excel 提醒”：该会话不再提示和拦截写入，但门禁规则、浏览器规则照常注入。
     reminders = sync_reminders_enabled(root, payload)

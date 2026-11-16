@@ -123,6 +123,87 @@ class SyncTests(unittest.TestCase):
         rows = [self.role(i, '岗位待筛选') for i in range(4)] + [self.company_row('C00002', '待搜索'), self.company_row('C00001', '已有岗位')]
         self.run_cmd('confirm', '--input', self.items(rows), '--quote', '确认迁移')
 
+    def test_first_login_config_only_as_component_minimal_contract(self):
+        """C31（2026-11-13）：首版登录配置由投递组件按固定规则直接写入；只收本人登录最小契约，已有配置不被首版写入覆盖。"""
+        import hashlib
+        ctx = S.Ctx(self.root, '产品管理/labels.json')
+        rule = '首版登录配置由组件按固定规则写入'
+        site = next(code for code, v in M.sites(self.master()).items() if v['站点'] == 'https://a.example')
+        company = M.sites(self.master())[site]['公司编码']
+        config = {'schemaVersion': 1, 'companyId': company, 'version': 1, 'origin': 'https://a.example', 'loginPath': '/0',
+                  'allowedPaths': ['/'], 'loginMethod': 'user_operated',
+                  'success': {'noApplicationSubmission': True, 'requiresLoginFormAbsent': True},
+                  'evidence': {'sourceUrl': 'https://a.example/0', 'capturedAt': 't', 'method': 'confirmed_role_links'},
+                  'confirmation': {'mode': 'component_first_config', 'rule': rule, 'confirmedAt': 't'}}
+        sha = lambda c: hashlib.sha256(json.dumps({'company': company, 'site': site, 'config': c}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        before = self.master()
+        bad = [
+            (config, rule, 'stale'),
+            ({**config, 'confirmation': {'userQuote': rule, 'confirmedAt': 't'}}, rule, None),
+            ({**config, 'entry': {'kind': 'resume_modal'}}, rule, None),
+            ({**config, 'origin': 'https://b.example'}, rule, None),
+            ({**config, 'version': 2}, rule, None),
+            (config, '别的规则', None),
+        ]
+        for c, q, s_ in bad:
+            with self.assertRaises(SystemExit):
+                S.set_site_login_config(ctx, {'company': company, 'site': site, 'config': c}, q, s_ or sha(c))
+        self.assertEqual(self.master().get('login_configs'), before.get('login_configs'))
+        out = S.set_site_login_config(ctx, {'company': company, 'site': site, 'config': config}, rule, sha(config))
+        self.assertTrue(out['created'])
+        self.assertEqual(self.master()['login_configs'][company][site], config)
+        self.assertEqual(self.master()['sheets'], before['sheets'])
+        changed = {**config, 'loginPath': '/1'}
+        with self.assertRaises(SystemExit):
+            S.set_site_login_config(ctx, {'company': company, 'site': site, 'config': changed}, rule, sha(changed))
+        self.assertEqual(self.master()['login_configs'][company][site], config)
+
+    def test_first_entry_config_only_adds_entry_to_existing_login_config(self):
+        """C39（2026-11-16，用户“2.同意 3A”）：首版入口配置由投递组件观察一次真实点击后直接写入；只能在没有入口时新增 entry，
+        允许路径只能按规则放宽且须覆盖原路径与申请页；已有入口的站点仍只能经 site-entry 预览、用户确认。"""
+        import hashlib
+        ctx = S.Ctx(self.root, '产品管理/labels.json')
+        site = next(code for code, v in M.sites(self.master()).items() if v['站点'] == 'https://a.example')
+        company = M.sites(self.master())[site]['公司编码']
+        first_rule, rule = '首版登录配置由组件按固定规则写入', '首版入口配置由组件按固定规则写入'
+        login = {'schemaVersion': 1, 'companyId': company, 'version': 1, 'origin': 'https://a.example', 'loginPath': '/campus/0',
+                 'allowedPaths': ['/campus/'], 'loginMethod': 'user_operated',
+                 'success': {'noApplicationSubmission': True, 'requiresLoginFormAbsent': True},
+                 'evidence': {'sourceUrl': 'https://a.example/campus/0', 'capturedAt': 't', 'method': 'confirmed_role_links'},
+                 'confirmation': {'mode': 'component_first_config', 'rule': first_rule, 'confirmedAt': 't'}}
+        create_sha = hashlib.sha256(json.dumps({'company': company, 'site': site, 'config': login}, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        S.set_site_login_config(ctx, {'company': company, 'site': site, 'config': login}, first_rule, create_sha)
+        current_sha = lambda: hashlib.sha256(json.dumps(self.master()['login_configs'][company][site], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+        entry = {'kind': 'declarative_transition', 'target': 'same',
+                 'detail': {'location': {'pathnamePattern': '^/campus/detail$', 'query': {'id': '$roleId'}}, 'roleIdentity': {'source': 'query', 'parameter': 'id'}},
+                 'entryLocator': {'role': 'button', 'name': '投递', 'label': '投递'},
+                 'form': {'location': {'pathnamePattern': '^/form$', 'query': {'id': '$roleId'}}, 'readySelector': 'input', 'roleIdentity': {'source': 'query', 'parameter': 'id'}},
+                 'evidence': {'detailUrl': 'https://a.example/campus/detail?id=1', 'formUrl': 'https://a.example/form?id=1', 'capturedAt': 't', 'method': 'component_first_entry_observed_click'}}
+        config = {**login, 'entry': entry, 'allowedPaths': ['/'], 'version': 2,
+                  'confirmation': {'mode': 'component_first_entry', 'rule': rule, 'confirmedAt': 't'}}
+        before = self.master()['login_configs'][company][site]
+        bad = [
+            (config, rule, 'stale'),
+            (config, '别的规则', None),
+            ({**config, 'version': 3}, rule, None),
+            ({**config, 'loginPath': '/other'}, rule, None),
+            ({**config, 'allowedPaths': ['/campus/']}, rule, None),
+            ({**config, 'allowedPaths': ['/form']}, rule, None),
+            ({**config, 'entry': {**entry, 'evidence': {**entry['evidence'], 'formUrl': 'https://b.example/form?id=1'}}}, rule, None),
+            ({**config, 'entry': {**entry, 'kind': 'resume_modal'}}, rule, None),
+        ]
+        for c, q, s_ in bad:
+            with self.assertRaises(SystemExit):
+                S.set_site_login_config(ctx, {'company': company, 'site': site, 'config': c}, q, s_ or current_sha())
+        self.assertEqual(self.master()['login_configs'][company][site], before)
+        out = S.set_site_login_config(ctx, {'company': company, 'site': site, 'config': config}, rule, current_sha())
+        self.assertTrue(out['entryCreated'])
+        self.assertEqual(self.master()['login_configs'][company][site], config)
+        again = {**config, 'version': 3, 'confirmation': {'mode': 'component_first_entry', 'rule': rule, 'confirmedAt': 't2'}}
+        with self.assertRaises(SystemExit):
+            S.set_site_login_config(ctx, {'company': company, 'site': site, 'config': again}, rule, current_sha())
+        self.assertEqual(self.master()['login_configs'][company][site], config)
+
     def test_illegal_or_empty_label_blocks_write(self):
         p = self.run_cmd('write', ok=False)
         self.assertNotEqual(p.returncode, 0)
