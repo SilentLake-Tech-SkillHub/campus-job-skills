@@ -88,9 +88,9 @@ def recruiting_status_propose(items:list[dict])->dict:
 
 
 @operation
-def recruiting_status_confirm(items:list[dict],user_quote:str,confirmation_ref:str='')->dict:
+def recruiting_status_confirm(items:list[dict],user_quote:str,expected_sha:str,confirmation_ref:str='')->dict:
     """用户明确确认 propose 展示的变更后调用：记入确认台账并更新主数据 JSON。完成投递或关闭岗位时回刷相关公司宽表与批次进度。"""
-    return run_sync('confirm','--quote',user_quote,'--ref',confirmation_ref,items=items)
+    return run_sync('confirm','--quote',user_quote,'--ref',confirmation_ref,'--expect-sha',expected_sha,items=items)
 
 
 @operation

@@ -55,6 +55,21 @@ class SyncTests(unittest.TestCase):
         self.snapshot()
         self.run_cmd('set-quota-rules', '--input', self.items([self.quota(2)]))
 
+    def test_status_confirmation_requires_the_exact_displayed_preview(self):
+        self.migrate()
+        items = [self.role(0, '岗位待投递')]
+        input_file = self.items(items)
+        preview = json.loads(self.run_cmd('propose', '--input', input_file).stdout)
+        before = self.master()
+        wrong = self.run_cmd('confirm', '--input', input_file, '--quote', '确认', '--expect-sha', 'wrong', ok=False)
+        self.assertNotEqual(wrong.returncode, 0)
+        self.assertIn('STATUS_PREVIEW_BINDING_REQUIRED', wrong.stderr)
+        self.assertEqual(self.master(), before)
+        good = self.run_cmd('confirm', '--input', input_file, '--quote', '确认', '--expect-sha', preview['preview_sha'])
+        self.assertEqual(json.loads(good.stdout)['confirmed'], 1)
+        stale = self.run_cmd('confirm', '--input', input_file, '--quote', '确认', '--expect-sha', preview['preview_sha'], ok=False)
+        self.assertNotEqual(stale.returncode, 0)
+
     def test_migrate_login_configs_preserves_workbook_values_and_removes_only_verified_sources(self):
         base = self.root / '岗位交接/公司/中国大陆/甲公司'
         base.mkdir(parents=True)
@@ -102,6 +117,15 @@ class SyncTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def run_cmd(self, *args, ok=True):
+        if args and args[0] == 'confirm' and '--expect-sha' not in args:
+            import json_excel_sync as sync_module
+            try:
+                items = json.loads(Path(args[args.index('--input') + 1]).read_text())
+                preview_sha = sync_module.proposal_fingerprint(sync_module.Ctx(self.root, '产品管理/labels.json'), items)
+            except SystemExit:
+                preview_sha = 'invalid'
+            args = (*args, '--expect-sha', preview_sha)
+
         p = subprocess.run([sys.executable, '-B', str(SCRIPT), '--workspace', str(self.root), '--labels', '产品管理/labels.json', *args],
                            capture_output=True, text=True, encoding='utf-8')
         if ok and p.returncode:

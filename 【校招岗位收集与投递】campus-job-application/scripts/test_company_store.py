@@ -71,6 +71,15 @@ class CompanyStoreTests(unittest.TestCase):
         return json.loads(p.stdout) if p.stdout.strip() and ok else p
 
     def sync(self, *args, ok=True):
+        if args and args[0] == 'confirm' and '--expect-sha' not in args:
+            import json_excel_sync as sync_module
+            try:
+                items = json.loads(Path(args[args.index('--input') + 1]).read_text())
+                preview_sha = sync_module.proposal_fingerprint(sync_module.Ctx(self.root, '产品管理/labels.json'), items)
+            except SystemExit:
+                preview_sha = 'invalid'
+            args = (*args, '--expect-sha', preview_sha)
+
         p = subprocess.run([sys.executable, '-B', str(HERE / 'json_excel_sync.py'), '--workspace', str(self.root), '--labels', '产品管理/labels.json', *args],
                            capture_output=True, text=True, encoding='utf-8')
         if ok and p.returncode:

@@ -570,7 +570,9 @@ class Store:
         plan = S.propose(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], master) if items else []
         lines = [p['text'] for p in plan]
         at = now()
+        preview_sha = S.proposal_fingerprint(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items])
         for d in live.values():
+            d['批次']['反向预览指纹'] = preview_sha
             d['批次']['状态'], d['批次']['更新时间'] = '等待反向评审', at
             self.save(d)
         page = f"""<!doctype html><html lang=zh><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>反向评审</title>
@@ -611,8 +613,11 @@ class Store:
             if (d['批次'].get('确认') or {}).get('contentSha256') != content_sha(d):
                 raise SystemExit(f"{d['公司名称']} 的投递批次在确认后被改动，须重新正向评审")
         items, notes, roles = self._reverse_items()
+        expected_sha = S.proposal_fingerprint(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items])
+        if any(d['批次'].get('反向预览指纹') != expected_sha for d in live.values()):
+            raise SystemExit('STATUS_PREVIEW_BINDING_REQUIRED：反向评审内容已变化，请重新展示')
         if items:
-            S.confirm(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], quote.strip(), f'反向评审 {batch_id}', refresh_handoff=False)
+            S.confirm(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], quote.strip(), f'反向评审 {batch_id}', refresh_handoff=False, expected_sha=expected_sha)
         done = {i['outcomeKey'] for i in items} | {n['key'] for n in notes if n['event'] not in UNRESOLVED} | set(resolved)
         left = {k: v for k, v in roles.items() if k not in done}
         out = self.outcomes()

@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company search in this project — work through the master JSON's 待搜索 queue (or companies the user names), verify official plans and in-scope roles, write results only through the fixed script, get user confirmation for every status change, and hand confirmed roles to the application component through forward review. It never fills or submits applications.
 metadata:
-  version: "2.1.10"
+  version: "2.1.11"
 ---
 
 # 校招岗位搜索与主表维护
@@ -21,7 +21,7 @@ metadata:
 
 - 数据文件保护统一遵循[数据文件保护边界](references/data-file-protection.md)，执行前读取该唯一规则来源。
 - 记录唯一、覆盖更新：每类信息只有一个存放位置、只保留最新一版。禁止追加旧结论、另存副本/历史/备份、按批次另起同类文件；搜索过程文件放工作区以外的临时目录，结论写回后即删除。回滚只靠 git。
-- 投递状态只能用标签组文件里的标签（一组一个文件）：岗位行用 `产品管理/投递状态标签.json`，公司行用 `产品管理/公司状态标签.json`；每行一个、不得为空，写入前由脚本统一检查。每家公司在每张地区表固定一行公司行，有没有岗位都保留。任何状态变化（含首次赋值）先 `propose`，把“当前状态是X，更新状态是Y”原样给用户看，用户明确确认后 `confirm`（附用户原话）。`upsert` 只改非状态字段。
+- 投递状态只能用标签组文件里的标签（一组一个文件）：岗位行用 `产品管理/投递状态标签.json`，公司行用 `产品管理/公司状态标签.json`；每行一个、不得为空，写入前由脚本统一检查。每家公司在每张地区表固定一行公司行，有没有岗位都保留。任何状态变化（含首次赋值）先 `propose`，把“当前状态是X，更新状态是Y”原样给用户看，用户明确确认后 `confirm`（附用户原话与本次 propose 的 preview_sha；CLI --expect-sha / MCP expected_sha）。`upsert` 只改非状态字段。
 - 名额收口：用户的选择占满某公司“投递名额”表里“公司总量”的上限后，同公司剩余“岗位待筛选”在同一次确认中改为“岗位不符合用户要求”。用户选满之前，任何 Agent 不得因名额剔除岗位。
 - 对话结束前若 JSON 有未写入 Excel 的改动，展示逐格差异并问用户“现在写入 Excel，还是下一轮再写入”；现在写入 → `write`，下一轮 → `defer`（附原话）。
 

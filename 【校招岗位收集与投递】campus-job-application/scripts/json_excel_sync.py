@@ -1096,10 +1096,25 @@ def quota_closure(ctx, master):
     return derived, over
 
 
-def confirm(ctx, items, quote, ref, *, refresh_handoff=True):
+def proposal_fingerprint(ctx, items, master=None):
+    master = master if master is not None else ctx.load_master()
+    plan = propose(ctx, items, master)
+    sim = copy.deepcopy(master)
+    for item in plan:
+        _, idx, row = find_row(ctx, sim, item['key'])
+        set_cell(row, idx[ctx.column], item['to'])
+    derived, over = quota_closure(ctx, sim)
+    payload = {'changes': [{k: p[k] for k in ('key', 'from', 'to', 'text')} for p in plan],
+               'derived': derived, 'over': over}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')).hexdigest()
+
+
+def confirm(ctx, items, quote, ref, *, refresh_handoff=True, expected_sha=None):
     if not quote or not quote.strip():
         raise SystemExit('必须提供用户确认原话')
     master = ctx.load_master()
+    if not expected_sha or expected_sha != proposal_fingerprint(ctx, items, master):
+        raise SystemExit('STATUS_PREVIEW_BINDING_REQUIRED：请使用已展示预览的 preview_sha 确认；内容变化时重新展示')
     plan = propose(ctx, items, master)
     ledger = ctx.ledger()
     excel_now = excel_statuses(ctx)
@@ -1981,6 +1996,8 @@ def main():
         p = sub.add_parser(name)
         p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, to}] 或公司行 [{sheet, code: 公司编码, to}]')
         if name == 'confirm':
+            p.add_argument('--expect-sha', required=True)
+        if name == 'confirm':
             p.add_argument('--quote', required=True, help='用户确认原话')
             p.add_argument('--ref', default='', help='确认依据引用（对话/文件）')
     p = sub.add_parser('status')
@@ -2078,12 +2095,12 @@ def main():
             s_, idx_, row_ = find_row(ctx, sim, p_['key'])
             set_cell(row_, idx_[ctx.column], p_['to'])
         derived, over = quota_closure(ctx, sim)
-        out = {'show_user_exactly': [p_['text'] for p_ in plan] + [d['text'] for d in derived],
+        out = {'preview_sha': proposal_fingerprint(ctx, read(a.input), m), 'show_user_exactly': [p_['text'] for p_ in plan] + [d['text'] for d in derived],
                'user_changes': len(plan), 'quota_closure_changes': len(derived), 'quota_exceeded': over,
                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 调用 confirm'}
     elif a.cmd == 'confirm':
         with exclusive(ctx):
-            out = confirm(ctx, read(a.input), a.quote, a.ref)
+            out = confirm(ctx, read(a.input), a.quote, a.ref, expected_sha=a.expect_sha)
     elif a.cmd == 'upsert':
         with exclusive(ctx):
             out = upsert(ctx, read(a.input))
