@@ -123,9 +123,9 @@ def rules_text(cfg, root=None):
             + '\n'.join(lines) + '\n'
             + '   公司行=岗位名称与岗位链接均为空的行；每家公司在其出现的每张地区表固定一行公司行，有没有岗位都保留，新增岗位不占用公司行。\n'
             + f'2. 数据文件保护统一遵循 {Path(__file__).resolve().parent.parent / "references/data-file-protection.md"}，执行前读取该唯一规则来源。\n'
-            '3. 任何状态变更：先 propose，把输出的“当前状态是X，更新状态是Y”原样给用户看，取得用户明确确认后才能 confirm（附用户原话）。行一律按编码引用（岗位编码 J000001；公司行=地区表+公司编码 C00001）。岗位链接、投递链接、站点的登录链接/账号核对页只能用 relink / set-apply-link / set-site-links（先 --preview 给用户看，确认后带原话执行），不能用 upsert 直接改。官网无独立详情页的岗位，链接例外备注只能用 link-exception 写（先 --preview 给用户看，确认后执行）。\n'
+            '3. 状态变更按需求文档6.6：用户原话已点明岗位和目标状态，展示后以该原话直接confirm；组件发现的其他变更攒到轮末一次确认，不停其他公司；反向评审结果自动回写、只告知。行一律按编码引用（岗位编码 J000001；公司行=地区表+公司编码 C00001）。岗位链接、投递链接、站点的登录链接/账号核对页只能用 relink / set-apply-link / set-site-links（先 --preview 给用户看，确认后带原话执行），不能用 upsert 直接改。官网无独立详情页的岗位，链接例外备注只能用 link-exception 写（先 --preview 给用户看，确认后执行）。\n'
             '4. 名额收口：用户的选择占满本轮名额后，同范围剩余“岗位待筛选”由 confirm 自动改为“岗位不符合用户要求”，并在 propose 中一并展示；名额未被用户选满前不得剔除任何岗位。\n'
-            '5. 每次对话结束前，若 JSON 有未写入 Excel 的改动，必须问用户：现在写入 Excel，还是下一轮再写入；用户选现在写入则 write，选下一轮则 defer（附原话）。\n'
+            '5. 确认状态时同步写Excel；文件被占用无法写入时自动延后，不询问用户。结束前调用固定sync-auto处理其余待同步。\n'
             '6. 记录唯一：每类信息只有一个存放位置、只保留最新一版，更新=覆盖原值；禁止追加“旧结论/历史研究记录”，禁止另存副本/历史/备份，禁止按批次另起同类文件；回滚靠 git。岗位交接/ 下只允许固定文件（见 AGENTS.md）。\n'
             '7. 组件软锁：.agents/skills/campus-job-application/、.agents/skills/job-application-assistant-v2/ 的代码和 Hook 配置默认只读；用户在对话里明确批准修改组件后，本会话可以修改（12 小时内有效，用户说“收回授权”即失效），或由用户本人把 产品管理/组件维护.json 的“开启”改为 true。需要修改时先说明要改什么并请用户批准；AI 不得写开关文件和批准记录（.runtime/组件维护批准.json）。')
 
@@ -136,13 +136,15 @@ def pending_details(root, limit=30):
     return d.get('text') or ('差异明细生成失败：' + str(d.get('error', '未知错误')))
 
 
-def pending_text(root):
+def pending_text(root, retry_hint=False):
     p = sync(root, 'pending')
-    if p.get('unwritten') and not p.get('deferred_by_user'):
-        extra = '（另检测到 Excel 被脚本以外修改，写入会以 JSON 覆盖）' if p.get('excel_modified_outside_script') else ''
-        return (f"\n【待处理】JSON 有未写入 Excel 的改动（已确认待写入的状态变更 {p.get('confirmed_status_changes_waiting', 0)} 行）{extra}。"
-                '请先把下面的实际差异明细原样展示给用户（禁止只报总数），再询问用户：现在写入 Excel，还是下一轮再写入。\n'
-                + pending_details(root)), p
+    if p.get('unwritten') and not (p.get('deferred') or p.get('deferred_by_user')):
+        result = sync(root, 'sync-auto')
+        if result.get('written') or result.get('deferred'):
+            return '', sync(root, 'pending')
+        return '自动同步未完成：' + str(result.get('error', result)), p
+    if retry_hint and p.get('unwritten') and p.get('automatically_deferred'):
+        return '【自动延后】上轮Excel被占用，已记录本轮用固定sync-auto重试；不再询问用户。', p
     return '', p
 
 
@@ -794,7 +796,7 @@ def main():
         emit({})
         return 0
     if event in ('SessionStart', 'UserPromptSubmit', 'SubagentStart', 'PreInvocation'):
-        extra = pending_text(root)[0] if reminders else ''
+        extra = pending_text(root, retry_hint=event in ('UserPromptSubmit', 'SessionStart'))[0] if reminders else ''
         ctx = rules_text(cfg, root) + browser_rules(root) + note + extra
         if a.host == 'agy':
             emit({'injectSteps': [{'ephemeralMessage': ctx}]})
@@ -834,7 +836,7 @@ def main():
             notes.append('名额已被用户选满但仍有岗位未收口：' + '；'.join(quota['quota_full_but_unclosed'][:5])
                          + '。请用 json_excel_sync.py propose 把收口变更原样给用户看并等待确认。')
         if notes:
-            ask = ' 请直接问用户：“JSON 有未写入 Excel 的改动，现在写入，还是下一轮再写入？”然后结束本轮等待回答。' if extra else ' 然后结束本轮等待回答。'
+            ask = ' 请报告固定同步入口返回的实际错误并处理。' if extra else ' 然后结束本轮等待回答。'
             emit({'decision': 'block', 'reason': '结束前必须处理：' + ' '.join(notes) + ask})
             return 0
         emit({})

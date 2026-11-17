@@ -58,6 +58,7 @@ class CompanyStoreTests(unittest.TestCase):
         M.assign_missing_codes(snap, ['中国大陆'])
         S.refresh_digest(snap)
         (r / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+        S.write(S.Ctx(r, '产品管理/labels.json'), code_migration=True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -71,15 +72,6 @@ class CompanyStoreTests(unittest.TestCase):
         return json.loads(p.stdout) if p.stdout.strip() and ok else p
 
     def sync(self, *args, ok=True):
-        if args and args[0] == 'confirm' and '--expect-sha' not in args:
-            import json_excel_sync as sync_module
-            try:
-                items = json.loads(Path(args[args.index('--input') + 1]).read_text())
-                preview_sha = sync_module.proposal_fingerprint(sync_module.Ctx(self.root, '产品管理/labels.json'), items)
-            except SystemExit:
-                preview_sha = 'invalid'
-            args = (*args, '--expect-sha', preview_sha)
-
         p = subprocess.run([sys.executable, '-B', str(HERE / 'json_excel_sync.py'), '--workspace', str(self.root), '--labels', '产品管理/labels.json', *args],
                            capture_output=True, text=True, encoding='utf-8')
         if ok and p.returncode:
@@ -131,7 +123,15 @@ class CompanyStoreTests(unittest.TestCase):
     # ---------- 编码迁移首次写 Excel ----------
     def test_code_migration_first_write_requires_identical_statuses_and_runs_once(self):
         ctx = S.Ctx(self.root, '产品管理/labels.json')
-        with self.assertRaises(SystemExit):  # Excel 还没有编码列：正常门禁按编码配不上行
+        # This test starts from the pre-migration workbook; other fixtures are already aligned.
+        from openpyxl import load_workbook
+        wb = load_workbook(self.root / 'book.xlsx')
+        ws = wb['中国大陆']
+        for col in range(ws.max_column, 0, -1):
+            if ws.cell(1, col).value in ('公司编码', '站点编码', '岗位编码'):
+                ws.delete_cols(col)
+        wb.save(self.root / 'book.xlsx')
+        with self.assertRaises(SystemExit):
             S.write(ctx)
         m = self.master()
         sh = m['sheets'][0]
@@ -375,7 +375,7 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual(self.doc()['站点'][0]['账号核对页'], 'https://jia.jobs.example.cn/me')
 
     # ---------- 反向评审 ----------
-    def test_reverse_review_writes_master_only_after_user_confirmation(self):
+    def test_reverse_review_applies_results_without_waiting_for_user_confirmation(self):
         self.set_order((J_AI, 1), (J_GAME, 2))
         self.run_cmd('forward')
         self.assertNotEqual(self.run_cmd('reverse', ok=False).returncode, 0)  # 未确认交接不能反向评审
@@ -385,9 +385,9 @@ class CompanyStoreTests(unittest.TestCase):
         out = self.run_cmd('reverse')
         self.assertEqual(out['show_user_exactly'], [f'中国大陆｜甲公司｜AI产品经理（{J_AI}）：当前状态是「岗位待投递」，更新状态是「岗位已投递」'])
         self.assertIn('游戏产品：投递结果不确定或受阻，处理前禁止重跑', out['notes'])
-        self.assertNotIn('岗位已投递', (self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
+        self.assertIn('岗位已投递', (self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
         self.assertNotEqual(self.run_cmd('forward', ok=False).returncode, 0)  # 未回写完不能开下一批
-        res = self.run_cmd('reverse-confirm', '--quote', '确认回写')
+        res = out
         self.assertEqual((res['companies'], res['statusChanges'], res['unresolved']), ({'C00001': '等待反向评审'}, 1, [J_GAME]))
         self.assertIn('岗位已投递', (self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
         self.run_cmd('reverse')
@@ -400,17 +400,15 @@ class CompanyStoreTests(unittest.TestCase):
         self.handed()
         before = C.content_sha(self.doc())
         self.outcome(J_AI, 'submission_confirmed', 'AI产品经理')
-        self.run_cmd('reverse')
-        got = self.run_cmd('reverse-confirm', '--quote', '确认这一条')
+        got = self.run_cmd('reverse')
         self.assertEqual(got['companies'], {'C00001': '进行中'})
         jia = self.doc()
         self.assertEqual(jia['批次']['进度'], {'已处理': [J_AI], '待投递': [J_GAME]})
         self.assertEqual(C.content_sha(jia), before)
         self.assertIsNone(C.verify_handoff(jia))
-        self.assertNotEqual(self.run_cmd('reverse-confirm', '--quote', '再确认', ok=False).returncode, 0)
+        self.assertTrue(self.run_cmd('reverse-confirm')['alreadyApplied'])
         self.outcome(J_GAME, 'submission_confirmed', '游戏产品')
-        self.run_cmd('reverse')
-        self.assertEqual(self.run_cmd('reverse-confirm', '--quote', '确认最后一条')['companies'], {'C00001': '已回写'})
+        self.assertEqual(self.run_cmd('reverse')['companies'], {'C00001': '已回写'})
 
     def test_reverse_confirm_keeps_pending_link_observations(self):
         self.handed()

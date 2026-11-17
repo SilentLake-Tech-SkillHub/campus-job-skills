@@ -1096,25 +1096,10 @@ def quota_closure(ctx, master):
     return derived, over
 
 
-def proposal_fingerprint(ctx, items, master=None):
-    master = master if master is not None else ctx.load_master()
-    plan = propose(ctx, items, master)
-    sim = copy.deepcopy(master)
-    for item in plan:
-        _, idx, row = find_row(ctx, sim, item['key'])
-        set_cell(row, idx[ctx.column], item['to'])
-    derived, over = quota_closure(ctx, sim)
-    payload = {'changes': [{k: p[k] for k in ('key', 'from', 'to', 'text')} for p in plan],
-               'derived': derived, 'over': over}
-    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode('utf-8')).hexdigest()
-
-
-def confirm(ctx, items, quote, ref, *, refresh_handoff=True, expected_sha=None):
-    if not quote or not quote.strip():
+def confirm(ctx, items, quote, ref, *, refresh_handoff=True, component_result=False):
+    if not component_result and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户确认原话')
     master = ctx.load_master()
-    if not expected_sha or expected_sha != proposal_fingerprint(ctx, items, master):
-        raise SystemExit('STATUS_PREVIEW_BINDING_REQUIRED：请使用已展示预览的 preview_sha 确认；内容变化时重新展示')
     plan = propose(ctx, items, master)
     ledger = ctx.ledger()
     excel_now = excel_statuses(ctx)
@@ -1124,7 +1109,8 @@ def confirm(ctx, items, quote, ref, *, refresh_handoff=True, expected_sha=None):
         set_cell(row, idx[ctx.column], p['to'])
         ledger['entries'].append({'id': uuid.uuid4().hex, 'key': p['key'], 'from': p['from'],
                                   'from_excel': excel_now.get(key_id(p['key']), ''), 'to': p['to'],
-                                  'shown_to_user': p['text'], 'user_quote': quote.strip(),
+                                  'shown_to_user': p['text'], 'user_quote': quote.strip() if quote else None,
+                                  'confirmation_source': 'component_result' if component_result else 'user',
                                   'confirmation_ref': ref, 'confirmed_at': at, 'applied_at': None})
     derived, over = quota_closure(ctx, master)
     if over:
@@ -1134,7 +1120,8 @@ def confirm(ctx, items, quote, ref, *, refresh_handoff=True, expected_sha=None):
         set_cell(row, idx[ctx.column], p['to'])
         ledger['entries'].append({'id': uuid.uuid4().hex, 'key': p['key'], 'from': p['from'],
                                   'from_excel': excel_now.get(key_id(p['key']), ''), 'to': p['to'],
-                                  'shown_to_user': p['text'], 'user_quote': quote.strip(),
+                                  'shown_to_user': p['text'], 'user_quote': quote.strip() if quote else None,
+                                  'confirmation_source': 'component_result' if component_result else 'user',
                                   'confirmation_ref': ref, 'confirmed_at': at, 'applied_at': None,
                                   'derived_by': 'quota_closure', 'quota': p['quota']})
     refresh_digest(master)
@@ -1151,8 +1138,8 @@ def confirm(ctx, items, quote, ref, *, refresh_handoff=True, expected_sha=None):
         if companies:
             from company_store import Store
             Store(ctx.root, ctx.labels_path).refresh_confirmed_statuses(companies)
-    return {'confirmed': len(plan), 'quota_closure_changes': [p['text'] for p in derived], 'excel_written': False,
-            'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
+    synced = write_or_defer(ctx)
+    return {'confirmed': len(plan), 'show_user_exactly': [p['text'] for p in plan] + [p['text'] for p in derived], 'quota_closure_changes': [p['text'] for p in derived], 'excel_written': synced.get('written', False), 'excel_sync': synced, 'next': '告知结果后继续其他可执行任务'}
 
 
 def _company_code(master, key):
@@ -1873,19 +1860,33 @@ def pending(ctx):
     else:
         unwritten = diff_counts(ctx, master)[0] > 0
     ledger = ctx.ledger()
-    deferred = any(d.get('data_sha256') == master['data_sha256'] for d in ledger.get('deferrals', []))
+    deferrals = [d for d in ledger.get('deferrals', []) if d.get('data_sha256') == master['data_sha256']]
+    deferred = bool(deferrals)
+    user_deferred = any(d.get('user_quote') for d in deferrals)
+    auto_deferred = any(d.get('reason') == 'excel_busy' for d in deferrals)
     waiting = sum(1 for e in ledger['entries'] if not e.get('applied_at') and not e.get('superseded_at'))
-    return {'unwritten': unwritten, 'deferred_by_user': deferred, 'confirmed_status_changes_waiting': waiting,
+    return {'unwritten': unwritten, 'deferred': deferred, 'deferred_by_user': user_deferred, 'automatically_deferred': auto_deferred, 'confirmed_status_changes_waiting': waiting,
             'excel_modified_outside_script': bool(w) and w.get('workbook_sha256') != excel_sha}
 
 
-def defer(ctx, quote):
-    if not quote or not quote.strip():
+def write_or_defer(ctx):
+    try:
+        return write(ctx)
+    except OSError as error:
+        if error.errno not in (13, 16, 32):
+            raise
+        return defer(ctx, None, automatic=True)
+    except SystemExit as error:
+        return {'written': False, 'error': str(error), 'requiresAgentRepair': True}
+
+
+def defer(ctx, quote, automatic=False):
+    if not automatic and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户“下一轮再写入”的原话')
     master = ctx.load_master()
     refresh_digest(master)
     ledger = ctx.ledger()
-    ledger.setdefault('deferrals', []).append({'data_sha256': master['data_sha256'], 'user_quote': quote.strip(), 'deferred_at': now()})
+    ledger['deferrals'] = [{'data_sha256': master['data_sha256'], 'user_quote': quote.strip() if quote else None, 'reason': 'excel_busy' if automatic else 'user_choice', 'deferred_at': now()}]
     save_json(ctx.ledger_path, ledger)
     return {'deferred': True}
 
@@ -1985,6 +1986,7 @@ def main():
     p = sub.add_parser('diff')
     p.add_argument('--limit', type=int, default=30, help='最多展开行数，0 为全部')
     sub.add_parser('write')
+    sub.add_parser('sync-auto')
     p = sub.add_parser('query')
     p.add_argument('--company')
     p.add_argument('--sheet')
@@ -1995,8 +1997,6 @@ def main():
     for name in ('propose', 'confirm'):
         p = sub.add_parser(name)
         p.add_argument('--input', required=True, help='UTF-8 JSON：[{code: 岗位编码, to}] 或公司行 [{sheet, code: 公司编码, to}]')
-        if name == 'confirm':
-            p.add_argument('--expect-sha', required=True)
         if name == 'confirm':
             p.add_argument('--quote', required=True, help='用户确认原话')
             p.add_argument('--ref', default='', help='确认依据引用（对话/文件）')
@@ -2095,18 +2095,26 @@ def main():
             s_, idx_, row_ = find_row(ctx, sim, p_['key'])
             set_cell(row_, idx_[ctx.column], p_['to'])
         derived, over = quota_closure(ctx, sim)
-        out = {'preview_sha': proposal_fingerprint(ctx, read(a.input), m), 'show_user_exactly': [p_['text'] for p_ in plan] + [d['text'] for d in derived],
+        out = {'show_user_exactly': [p_['text'] for p_ in plan] + [d['text'] for d in derived],
                'user_changes': len(plan), 'quota_closure_changes': len(derived), 'quota_exceeded': over,
                'rule': '必须把 show_user_exactly 原样展示给用户并取得明确确认后，才能用同一 input 调用 confirm'}
     elif a.cmd == 'confirm':
         with exclusive(ctx):
-            out = confirm(ctx, read(a.input), a.quote, a.ref, expected_sha=a.expect_sha)
+            out = confirm(ctx, read(a.input), a.quote, a.ref)
     elif a.cmd == 'upsert':
         with exclusive(ctx):
             out = upsert(ctx, read(a.input))
     elif a.cmd == 'write':
         with exclusive(ctx):
-            out = write(ctx)
+            try:
+                out = write(ctx)
+            except OSError as error:
+                if error.errno not in (13, 16, 32):
+                    raise
+                out = defer(ctx, None, automatic=True)
+    elif a.cmd == 'sync-auto':
+        with exclusive(ctx):
+            out = write_or_defer(ctx)
     elif a.cmd == 'pending':
         out = pending(ctx)
     elif a.cmd == 'query':

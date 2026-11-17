@@ -88,9 +88,9 @@ def recruiting_status_propose(items:list[dict])->dict:
 
 
 @operation
-def recruiting_status_confirm(items:list[dict],user_quote:str,expected_sha:str,confirmation_ref:str='')->dict:
-    """用户明确确认 propose 展示的变更后调用：记入确认台账并更新主数据 JSON。完成投递或关闭岗位时回刷相关公司宽表与批次进度。"""
-    return run_sync('confirm','--quote',user_quote,'--ref',confirmation_ref,'--expect-sha',expected_sha,items=items)
+def recruiting_status_confirm(items:list[dict],user_quote:str,confirmation_ref:str='')->dict:
+    """用户原话已点明岗位及目标状态时展示后直接调用；组件发现的其它变更轮末一次确认。记入台账、更新JSON并同步Excel，完成投递或关闭时刷新交接。"""
+    return run_sync('confirm','--quote',user_quote,'--ref',confirmation_ref,items=items)
 
 
 @operation
@@ -150,8 +150,8 @@ def recruiting_site_links_confirm(items:list[dict],user_quote:str,expected_sha:s
 
 @operation
 def recruiting_json_write_excel()->dict:
-    """JSON→Excel 唯一写入：标签门禁、状态确认门禁、写出、逐格读回。仅在用户选择“现在写入”后调用。"""
-    return run_sync('write')
+    """JSON→Excel 唯一写入：标签门禁、状态确认门禁、写出、逐格读回。确认状态时自动写入；显式补写不再另行询问。"""
+    return run_sync('sync-auto')
 
 
 @operation
