@@ -59,7 +59,7 @@ metadata:
 
 ## 交给投递组件
 
-选岗由用户决定。用户确认“岗位待投递”后，按 [本轮需求入口](references/application-requirements.md) 从临时表取范围，再按 [正向评审与反向评审](references/company-review-handoff.md) 在各公司宽表里生成本轮「批次」，把返回的交接清单直接在对话回复，用户确认后交给投递组件。确认投递结果后回刷主表及相关公司宽表与批次进度。本 Skill 不填表、不上传简历、不提交申请。
+选岗由用户决定。用户确认“岗位待投递”后，按 [本轮需求入口](references/application-requirements.md) 从临时表取范围，再按 [正向评审与反向评审](references/company-review-handoff.md) 在各公司宽表里生成本轮「批次」，把返回的交接清单直接在对话回复，用户确认后交给投递组件。反向评审按正式结果自动回刷主表及相关公司宽表与批次进度，并告知用户。本 Skill 不填表、不上传简历、不提交申请。
 
 ## 数据接口
 
