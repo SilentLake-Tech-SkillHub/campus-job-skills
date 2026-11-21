@@ -58,6 +58,7 @@ class CompanyStoreTests(unittest.TestCase):
         M.assign_missing_codes(snap, ['中国大陆'])
         S.refresh_digest(snap)
         (r / '岗位交接/工作簿全量.json').write_text(json.dumps(snap, ensure_ascii=False), encoding='utf-8')
+        S.write(S.Ctx(r, '产品管理/labels.json'), code_migration=True)
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -107,6 +108,31 @@ class CompanyStoreTests(unittest.TestCase):
         d['roles'][code] = {'event': event, 'roleTitle': title, 'batchId': 'B'}
         f.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
 
+    def install_acceptance_script(self, source):
+        tools = self.root / 'tools'
+        tools.mkdir(exist_ok=True)
+        (tools / 'production_acceptance_sync.py').write_text(source, encoding='utf-8')
+
+    def install_acceptance_readback(self):
+        self.install_acceptance_script('''
+import json
+import sys
+from pathlib import Path
+
+assert sys.argv[1] == '--workspace'
+root = Path(sys.argv[2])
+handoff = root / '岗位交接'
+company = json.loads((handoff / '公司/C00001.json').read_text())
+assert company['批次']['进度']['已处理'] == ['J000001']
+assert next(r['投递状态'] for r in company['岗位'] if r['岗位编码'] == 'J000001') == '岗位已投递'
+confirmation = json.loads((root / '产品管理/确认.json').read_text())['entries'][-1]
+assert confirmation['to'] == '岗位已投递'
+assert confirmation['applied_at']
+outcomes = handoff / '投递回传.json'
+assert not outcomes.exists() or 'J000001' not in json.loads(outcomes.read_text())['roles']
+print(json.dumps({'status': 'updated', 'rows': 1}))
+''')
+
     def observe(self, *items):
         f = self.root / '岗位交接/投递回传.json'
         d = json.loads(f.read_text(encoding='utf-8')) if f.exists() else {'schemaVersion': 2, 'roles': {}, 'observations': []}
@@ -122,7 +148,15 @@ class CompanyStoreTests(unittest.TestCase):
     # ---------- 编码迁移首次写 Excel ----------
     def test_code_migration_first_write_requires_identical_statuses_and_runs_once(self):
         ctx = S.Ctx(self.root, '产品管理/labels.json')
-        with self.assertRaises(SystemExit):  # Excel 还没有编码列：正常门禁按编码配不上行
+        # This test starts from the pre-migration workbook; other fixtures are already aligned.
+        from openpyxl import load_workbook
+        wb = load_workbook(self.root / 'book.xlsx')
+        ws = wb['中国大陆']
+        for col in range(ws.max_column, 0, -1):
+            if ws.cell(1, col).value in ('公司编码', '站点编码', '岗位编码'):
+                ws.delete_cols(col)
+        wb.save(self.root / 'book.xlsx')
+        with self.assertRaises(SystemExit):
             S.write(ctx)
         m = self.master()
         sh = m['sheets'][0]
@@ -253,11 +287,23 @@ class CompanyStoreTests(unittest.TestCase):
 
     def test_direct_submission_confirmation_refreshes_handoff_progress(self):
         self.handed()
-        self.sync('confirm', '--input', self.write('c.json', [{"code": J_AI, "to": "岗位已投递"}]), '--quote', '确认已投递')
+        self.install_acceptance_readback()
+        reply = self.sync('confirm', '--input', self.write('c.json', [{"code": J_AI, "to": "岗位已投递"}]), '--quote', '确认已投递')
+        self.assertEqual(json.loads(reply.stdout)['production_acceptance'], {'status': 'updated', 'rows': 1})
         doc = self.doc()
         self.assertEqual(next(r['投递状态'] for r in doc['岗位'] if r['岗位编码'] == J_AI), '岗位已投递')
         self.assertIn(J_AI, doc['批次']['进度']['已处理'])
         self.assertNotIn(J_AI, doc['批次']['进度']['待投递'])
+
+    def test_acceptance_failure_is_reported_after_confirmation_commits(self):
+        self.handed()
+        self.install_acceptance_script('raise SystemExit(7)')
+        reply = self.sync('confirm', '--input', self.write('c.json', [{'code': J_AI, 'to': '岗位已投递'}]), '--quote', '确认已投递')
+        result = json.loads(reply.stdout)
+        self.assertEqual(result['confirmed'], 1)
+        self.assertTrue(result['excel_written'])
+        self.assertEqual(result['production_acceptance'], {'status': 'error', 'exit_code': 7})
+        self.assertIn(J_AI, self.doc()['批次']['进度']['已处理'])
 
     def test_status_changes_elsewhere_do_not_break_the_confirmation(self):
         """内容指纹只覆盖执行内容：主表里改投递状态、JD 等不让已确认的交接失效。"""
@@ -366,19 +412,21 @@ class CompanyStoreTests(unittest.TestCase):
         self.assertEqual(self.doc()['站点'][0]['账号核对页'], 'https://jia.jobs.example.cn/me')
 
     # ---------- 反向评审 ----------
-    def test_reverse_review_writes_master_only_after_user_confirmation(self):
+    def test_reverse_review_applies_results_without_waiting_for_user_confirmation(self):
         self.set_order((J_AI, 1), (J_GAME, 2))
         self.run_cmd('forward')
         self.assertNotEqual(self.run_cmd('reverse', ok=False).returncode, 0)  # 未确认交接不能反向评审
         self.run_cmd('forward-confirm', '--quote', '确认交接')
         self.outcome(J_AI, 'submission_confirmed', 'AI产品经理')
         self.outcome(J_GAME, 'submission_uncertain', '游戏产品')
+        self.install_acceptance_readback()
         out = self.run_cmd('reverse')
+        self.assertEqual(out['production_acceptance'], {'status': 'updated', 'rows': 1})
         self.assertEqual(out['show_user_exactly'], [f'中国大陆｜甲公司｜AI产品经理（{J_AI}）：当前状态是「岗位待投递」，更新状态是「岗位已投递」'])
         self.assertIn('游戏产品：投递结果不确定或受阻，处理前禁止重跑', out['notes'])
-        self.assertNotIn('岗位已投递', (self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
+        self.assertIn('岗位已投递', (self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
         self.assertNotEqual(self.run_cmd('forward', ok=False).returncode, 0)  # 未回写完不能开下一批
-        res = self.run_cmd('reverse-confirm', '--quote', '确认回写')
+        res = out
         self.assertEqual((res['companies'], res['statusChanges'], res['unresolved']), ({'C00001': '等待反向评审'}, 1, [J_GAME]))
         self.assertIn('岗位已投递', (self.root / '岗位交接/工作簿全量.json').read_text(encoding='utf-8'))
         self.run_cmd('reverse')
@@ -391,17 +439,15 @@ class CompanyStoreTests(unittest.TestCase):
         self.handed()
         before = C.content_sha(self.doc())
         self.outcome(J_AI, 'submission_confirmed', 'AI产品经理')
-        self.run_cmd('reverse')
-        got = self.run_cmd('reverse-confirm', '--quote', '确认这一条')
+        got = self.run_cmd('reverse')
         self.assertEqual(got['companies'], {'C00001': '进行中'})
         jia = self.doc()
         self.assertEqual(jia['批次']['进度'], {'已处理': [J_AI], '待投递': [J_GAME]})
         self.assertEqual(C.content_sha(jia), before)
         self.assertIsNone(C.verify_handoff(jia))
-        self.assertNotEqual(self.run_cmd('reverse-confirm', '--quote', '再确认', ok=False).returncode, 0)
+        self.assertTrue(self.run_cmd('reverse-confirm')['alreadyApplied'])
         self.outcome(J_GAME, 'submission_confirmed', '游戏产品')
-        self.run_cmd('reverse')
-        self.assertEqual(self.run_cmd('reverse-confirm', '--quote', '确认最后一条')['companies'], {'C00001': '已回写'})
+        self.assertEqual(self.run_cmd('reverse')['companies'], {'C00001': '已回写'})
 
     def test_reverse_confirm_keeps_pending_link_observations(self):
         self.handed()

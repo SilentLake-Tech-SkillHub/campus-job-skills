@@ -55,6 +55,29 @@ class SyncTests(unittest.TestCase):
         self.snapshot()
         self.run_cmd('set-quota-rules', '--input', self.items([self.quota(2)]))
 
+    def test_user_statement_confirms_without_a_preview_fingerprint_and_busy_excel_defers(self):
+        from unittest.mock import patch
+        self.migrate()
+        ctx = S.Ctx(self.root, '产品管理/labels.json')
+        with patch.object(S, 'write', side_effect=PermissionError(13, 'workbook busy')):
+            result = S.confirm(ctx, [self.role(0, '岗位待投递')], '产品经理0改为岗位待投递', 'user statement')
+        self.assertEqual(result['confirmed'], 1)
+        self.assertFalse(result['excel_written'])
+        self.assertTrue(S.pending(ctx)['automatically_deferred'])
+        self.assertFalse(S.pending(ctx)['deferred_by_user'])
+        self.assertEqual(ctx.ledger()['deferrals'][-1]['reason'], 'excel_busy')
+        self.assertIsNone(ctx.ledger()['deferrals'][-1]['user_quote'])
+
+    def test_status_confirmation_uses_the_users_statement_without_a_second_confirmation(self):
+        self.migrate()
+        input_file = self.items([self.role(0, '岗位待投递')])
+        preview = json.loads(self.run_cmd('propose', '--input', input_file).stdout)
+        self.assertNotIn('preview_sha', preview)
+        result = json.loads(self.run_cmd('confirm', '--input', input_file, '--quote', '产品经理0改为岗位待投递').stdout)
+        self.assertEqual(result['confirmed'], 1)
+        self.assertTrue(result['excel_written'])
+        self.assertFalse(json.loads(self.run_cmd('pending').stdout)['unwritten'])
+
     def test_migrate_login_configs_preserves_workbook_values_and_removes_only_verified_sources(self):
         base = self.root / '岗位交接/公司/中国大陆/甲公司'
         base.mkdir(parents=True)
@@ -236,9 +259,9 @@ class SyncTests(unittest.TestCase):
     def test_confirm_write_readback_and_dropdown(self):
         self.migrate()
         pend = json.loads(self.run_cmd('pending').stdout)
-        self.assertTrue(pend['unwritten'])
+        self.assertFalse(pend['unwritten'])
         out = json.loads(self.run_cmd('write').stdout)
-        self.assertEqual(out['status_changes_applied'], 6)
+        self.assertEqual(out['status_changes_applied'], 0)
         ws = load_workbook(self.root / 'book.xlsx')['中国大陆']
         self.assertEqual([ws.cell(r, 10).value for r in range(2, 8)], ['已有岗位'] + ['岗位待筛选'] * 4 + ['待搜索'])
         self.assertTrue(any('岗位待筛选' in dv.formula1 for dv in ws.data_validations.dataValidation))

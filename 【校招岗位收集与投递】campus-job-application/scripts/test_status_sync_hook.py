@@ -42,12 +42,13 @@ class HookDetailsTests(unittest.TestCase):
             self.assertIn('用户已确认，第一优先', result)
             self.assertEqual(before, (root / 'book.xlsx').read_bytes())
 
-    def test_pending_message_requires_details_before_question(self):
-        with patch.object(hook, 'sync', return_value={'unwritten': True}), \
-             patch.object(hook, 'pending_details', return_value='甲公司：旧值→新值'):
+    def test_pending_is_synced_without_asking_the_user_again(self):
+        def sync(root, command, *args):
+            return {'written': True} if command == 'sync-auto' else {'unwritten': True}
+        with patch.object(hook, 'sync', side_effect=sync) as call:
             text, _ = hook.pending_text(Path('.'))
-        self.assertIn('甲公司：旧值→新值', text)
-        self.assertIn('禁止只报总数', text)
+        self.assertEqual(text, '')
+        self.assertTrue(any(c.args[1] == 'sync-auto' for c in call.call_args_list))
 
     def test_patch_guard_checks_target_not_body(self):
         cfg = {'workbook': 'book.xlsx', 'masterData': 'master.json', 'confirmationLedger': 'ledger.json'}

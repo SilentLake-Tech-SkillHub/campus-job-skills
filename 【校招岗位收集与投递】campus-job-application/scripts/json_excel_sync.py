@@ -11,7 +11,7 @@
   check     校验主数据标签、字段、编码规则，报告 JSON 与 Excel 的差异和未确认的状态变更
   status    只读：显示某行当前状态
   propose   只读：生成“当前状态是X，更新状态是Y”的核对文本，不改任何文件
-  confirm   用户明确确认后，把变更逐行记入确认台账并更新主数据 JSON（不写 Excel）
+  confirm   用户确认后更新状态、确认台账和交接，同步 Excel 与工作区生产验收
   report    只读：一家或多家公司的汇报（主链接、计划、管培/产培、岗位按状态、名额与占用）
   upsert    新增岗位（分配岗位编码）或按编码改非状态字段；不能改投递状态、链接和编码列
   link-exception  登记/撤销“官网无独立详情页”的链接例外（按岗位编码），用户确认后执行
@@ -35,6 +35,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
 for _stream in (sys.stdout, sys.stderr):
     if hasattr(_stream, 'reconfigure'):
@@ -1096,8 +1097,32 @@ def quota_closure(ctx, master):
     return derived, over
 
 
-def confirm(ctx, items, quote, ref, *, refresh_handoff=True):
-    if not quote or not quote.strip():
+def sync_production_acceptance(ctx):
+    """Return the workspace's acceptance result separately from the committed status changes."""
+    script = ctx.root / 'tools' / 'production_acceptance_sync.py'
+    if not script.is_file():
+        return {'status': 'not_configured'}
+    try:
+        completed = subprocess.run(
+            [sys.executable, '-B', str(script), '--workspace', str(ctx.root)],
+            capture_output=True, encoding='utf-8', check=True, timeout=10,
+        )
+        result = json.loads(completed.stdout)
+    except subprocess.CalledProcessError as error:
+        return {'status': 'error', 'exit_code': error.returncode}
+    except subprocess.TimeoutExpired:
+        return {'status': 'error', 'reason': 'timeout'}
+    except OSError:
+        return {'status': 'error', 'reason': 'launch_failed'}
+    except ValueError:
+        return {'status': 'error', 'reason': 'invalid_output'}
+    if not isinstance(result, dict) or not isinstance(result.get('status'), str):
+        return {'status': 'error', 'reason': 'invalid_output'}
+    return result
+
+
+def confirm(ctx, items, quote, ref, *, refresh_handoff=True, component_result=False):
+    if not component_result and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户确认原话')
     master = ctx.load_master()
     plan = propose(ctx, items, master)
@@ -1109,7 +1134,8 @@ def confirm(ctx, items, quote, ref, *, refresh_handoff=True):
         set_cell(row, idx[ctx.column], p['to'])
         ledger['entries'].append({'id': uuid.uuid4().hex, 'key': p['key'], 'from': p['from'],
                                   'from_excel': excel_now.get(key_id(p['key']), ''), 'to': p['to'],
-                                  'shown_to_user': p['text'], 'user_quote': quote.strip(),
+                                  'shown_to_user': p['text'], 'user_quote': quote.strip() if quote else None,
+                                  'confirmation_source': 'component_result' if component_result else 'user',
                                   'confirmation_ref': ref, 'confirmed_at': at, 'applied_at': None})
     derived, over = quota_closure(ctx, master)
     if over:
@@ -1119,7 +1145,8 @@ def confirm(ctx, items, quote, ref, *, refresh_handoff=True):
         set_cell(row, idx[ctx.column], p['to'])
         ledger['entries'].append({'id': uuid.uuid4().hex, 'key': p['key'], 'from': p['from'],
                                   'from_excel': excel_now.get(key_id(p['key']), ''), 'to': p['to'],
-                                  'shown_to_user': p['text'], 'user_quote': quote.strip(),
+                                  'shown_to_user': p['text'], 'user_quote': quote.strip() if quote else None,
+                                  'confirmation_source': 'component_result' if component_result else 'user',
                                   'confirmation_ref': ref, 'confirmed_at': at, 'applied_at': None,
                                   'derived_by': 'quota_closure', 'quota': p['quota']})
     refresh_digest(master)
@@ -1136,8 +1163,13 @@ def confirm(ctx, items, quote, ref, *, refresh_handoff=True):
         if companies:
             from company_store import Store
             Store(ctx.root, ctx.labels_path).refresh_confirmed_statuses(companies)
-    return {'confirmed': len(plan), 'quota_closure_changes': [p['text'] for p in derived], 'excel_written': False,
-            'next': '对话结束前询问用户：现在写入 Excel，还是下一轮再写入'}
+    synced = write_or_defer(ctx)
+    result = {'confirmed': len(plan), 'show_user_exactly': [p['text'] for p in plan] + [p['text'] for p in derived],
+              'quota_closure_changes': [p['text'] for p in derived], 'excel_written': synced.get('written', False),
+              'excel_sync': synced, 'next': '告知结果后继续其他可执行任务'}
+    if refresh_handoff:
+        result['production_acceptance'] = sync_production_acceptance(ctx)
+    return result
 
 
 def _company_code(master, key):
@@ -1858,19 +1890,33 @@ def pending(ctx):
     else:
         unwritten = diff_counts(ctx, master)[0] > 0
     ledger = ctx.ledger()
-    deferred = any(d.get('data_sha256') == master['data_sha256'] for d in ledger.get('deferrals', []))
+    deferrals = [d for d in ledger.get('deferrals', []) if d.get('data_sha256') == master['data_sha256']]
+    deferred = bool(deferrals)
+    user_deferred = any(d.get('user_quote') for d in deferrals)
+    auto_deferred = any(d.get('reason') == 'excel_busy' for d in deferrals)
     waiting = sum(1 for e in ledger['entries'] if not e.get('applied_at') and not e.get('superseded_at'))
-    return {'unwritten': unwritten, 'deferred_by_user': deferred, 'confirmed_status_changes_waiting': waiting,
+    return {'unwritten': unwritten, 'deferred': deferred, 'deferred_by_user': user_deferred, 'automatically_deferred': auto_deferred, 'confirmed_status_changes_waiting': waiting,
             'excel_modified_outside_script': bool(w) and w.get('workbook_sha256') != excel_sha}
 
 
-def defer(ctx, quote):
-    if not quote or not quote.strip():
+def write_or_defer(ctx):
+    try:
+        return write(ctx)
+    except OSError as error:
+        if error.errno not in (13, 16, 32):
+            raise
+        return defer(ctx, None, automatic=True)
+    except SystemExit as error:
+        return {'written': False, 'error': str(error), 'requiresAgentRepair': True}
+
+
+def defer(ctx, quote, automatic=False):
+    if not automatic and (not quote or not quote.strip()):
         raise SystemExit('必须提供用户“下一轮再写入”的原话')
     master = ctx.load_master()
     refresh_digest(master)
     ledger = ctx.ledger()
-    ledger.setdefault('deferrals', []).append({'data_sha256': master['data_sha256'], 'user_quote': quote.strip(), 'deferred_at': now()})
+    ledger['deferrals'] = [{'data_sha256': master['data_sha256'], 'user_quote': quote.strip() if quote else None, 'reason': 'excel_busy' if automatic else 'user_choice', 'deferred_at': now()}]
     save_json(ctx.ledger_path, ledger)
     return {'deferred': True}
 
@@ -1970,6 +2016,7 @@ def main():
     p = sub.add_parser('diff')
     p.add_argument('--limit', type=int, default=30, help='最多展开行数，0 为全部')
     sub.add_parser('write')
+    sub.add_parser('sync-auto')
     p = sub.add_parser('query')
     p.add_argument('--company')
     p.add_argument('--sheet')
@@ -2089,7 +2136,15 @@ def main():
             out = upsert(ctx, read(a.input))
     elif a.cmd == 'write':
         with exclusive(ctx):
-            out = write(ctx)
+            try:
+                out = write(ctx)
+            except OSError as error:
+                if error.errno not in (13, 16, 32):
+                    raise
+                out = defer(ctx, None, automatic=True)
+    elif a.cmd == 'sync-auto':
+        with exclusive(ctx):
+            out = write_or_defer(ctx)
     elif a.cmd == 'pending':
         out = pending(ctx)
     elif a.cmd == 'query':

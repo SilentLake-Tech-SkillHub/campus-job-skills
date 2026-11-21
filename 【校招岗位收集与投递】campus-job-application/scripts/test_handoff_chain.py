@@ -167,9 +167,9 @@ class HandoffChainTests(unittest.TestCase):
         self.assertEqual(sorted(rev['show_user_exactly']), sorted([
             '中国大陆｜甲公司｜AI产品经理（J000001）：当前状态是「岗位待投递」，更新状态是「岗位已投递」',
             '中国大陆｜甲公司｜数据产品经理（J000002）：当前状态是「岗位待投递」，更新状态是「岗位失效/关闭」']))
-        self.assertEqual(self.status()['AI产品经理'], '岗位待投递')  # 反向评审只出评审页
+        self.assertEqual(self.status()['AI产品经理'], '岗位已投递')  # 反向评审直接回写并告知
 
-        res = self.py(STORE, 'reverse-confirm', '--quote', '确认回写')
+        res = rev
         self.assertEqual((res['companies'], res['statusChanges'], res['unresolved']), ({'C00001': '已回写'}, 2, []))
         self.assertEqual(self.status(), {'AI产品经理': '岗位已投递', '数据产品经理': '岗位失效/关闭'})
         self.assertFalse((self.root / '岗位交接/投递回传.json').exists())

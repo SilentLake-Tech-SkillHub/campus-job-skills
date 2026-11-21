@@ -410,8 +410,6 @@ class Store:
         return handoff_view(fresh) == handoff_view(doc)
 
     def forward_confirm(self, quote):
-        if not quote or not quote.strip():
-            raise SystemExit('必须提供用户确认原话')
         batch_id, docs = self.round()
         waiting = {c: d for c, d in docs.items() if d['批次']['状态'] == '等待正向评审'}
         if not waiting:
@@ -579,8 +577,8 @@ class Store:
 <h2>主表状态变更（需你确认）</h2><ul>{''.join('<li>' + html.escape(t) + '</li>' for t in lines) or '<li>无</li>'}</ul>
 <h2>不改状态、需要你知道或处理的结果</h2><ul>{''.join('<li>' + html.escape(n['title'] + '：' + n['说明']) + '</li>' for n in notes) or '<li>无</li>'}</ul></html>"""
         (self.handoff / '反向评审.html').write_text(page, encoding='utf-8')
-        return {'batchId': batch_id, 'state': '等待反向评审', 'show_user_exactly': lines,
-                'notes': [n['title'] + '：' + n['说明'] for n in notes], 'review': '岗位交接/反向评审.html'}
+        closed = self.reverse_confirm()
+        return {**closed, 'state': '结果已回写', 'show_user_exactly': lines, 'notes': [n['title'] + '：' + n['说明'] for n in notes], 'review': '岗位交接/反向评审.html', 'requiresUserConfirmation': False}
 
     def _reverse_items(self):
         """投递回传按岗位编码对到主表行：已投递/已关闭 → 状态变更；不确定/受阻/跳过 → 只列出待用户处理。"""
@@ -599,27 +597,26 @@ class Store:
                               '说明': '投递结果不确定或受阻，处理前禁止重跑' if o['event'] in UNRESOLVED else '用户跳过，状态不变'})
         return items, notes, roles
 
-    def reverse_confirm(self, quote, resolved=()):
+    def reverse_confirm(self, quote=None, resolved=()):
         """用户确认后：写主表状态（经 json_excel_sync 确认台账），清除已处理的回传；某家全部处理完 → 该家 已回写。"""
-        if not quote or not quote.strip():
-            raise SystemExit('必须提供用户确认原话')
         batch_id, docs = self.round()
         live = {c: d for c, d in docs.items() if d['批次']['状态'] == '等待反向评审'}
         if not live:
-            raise SystemExit('没有等待反向评审的批次，请先运行 reverse')
+            return {'batchId': batch_id, 'companies': {}, 'statusChanges': 0, 'unresolved': [], 'alreadyApplied': True}
         for d in live.values():
             if (d['批次'].get('确认') or {}).get('contentSha256') != content_sha(d):
                 raise SystemExit(f"{d['公司名称']} 的投递批次在确认后被改动，须重新正向评审")
         items, notes, roles = self._reverse_items()
         if items:
-            S.confirm(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], quote.strip(), f'反向评审 {batch_id}', refresh_handoff=False)
+            S.confirm(self.ctx, [{k: v for k, v in i.items() if k != 'outcomeKey'} for i in items], quote, f'反向评审 {batch_id}', refresh_handoff=False, component_result=True)
         done = {i['outcomeKey'] for i in items} | {n['key'] for n in notes if n['event'] not in UNRESOLVED} | set(resolved)
         left = {k: v for k, v in roles.items() if k not in done}
         out = self.outcomes()
         out['roles'] = left
         self.save_outcomes(out)
         summary = self.refresh_confirmed_statuses(live, done, left, batch_id)
-        return {'batchId': batch_id, 'companies': summary, 'statusChanges': len(items), 'unresolved': sorted(left)}
+        return {'batchId': batch_id, 'companies': summary, 'statusChanges': len(items), 'unresolved': sorted(left),
+                'production_acceptance': S.sync_production_acceptance(self.ctx)}
 
     def refresh_confirmed_statuses(self, codes, done=(), unresolved=None, batch_id=None):
         """从主表更新受影响公司的宽表及本轮执行进度。"""
@@ -695,7 +692,7 @@ def main():
     sub.add_parser('batch-status')
     sub.add_parser('reverse')
     p = sub.add_parser('reverse-confirm')
-    p.add_argument('--quote', required=True)
+    p.add_argument('--quote')
     p.add_argument('--resolved', action='append', default=[], help='用户已处理的不确定/受阻结果（岗位编码），确认后清除')
     a = ap.parse_args()
     st = Store(a.workspace, a.labels)
