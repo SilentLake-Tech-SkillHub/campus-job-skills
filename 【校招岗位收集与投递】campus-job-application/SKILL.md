@@ -2,7 +2,7 @@
 name: campus-job-application
 description: Use for every campus-job company search in this project — work through the master JSON's 待搜索 queue (or companies the user names), verify official plans and in-scope roles, write results only through the fixed script, get user confirmation for every status change, and hand confirmed roles to the application component through forward review. It never fills or submits applications.
 metadata:
-  version: "2.1.12"
+  version: "2.1.13"
 ---
 
 # 校招岗位搜索与主表维护
@@ -24,6 +24,7 @@ metadata:
 - 投递状态只能用标签组文件里的标签（一组一个文件）：岗位行用 `产品管理/投递状态标签.json`，公司行用 `产品管理/公司状态标签.json`；每行一个、不得为空，写入前由脚本统一检查。每家公司在每张地区表固定一行公司行，有没有岗位都保留。任何状态变化先propose展示；用户原话已点明岗位及目标状态时以该原话直接confirm，组件发现的其它变更攒到轮末一次确认，不停其它公司。状态确认不使用预览指纹，不重复询问。反向评审自动回写，只告知结果。`upsert` 只改非状态字段。
 - 名额收口：用户的选择占满某公司“投递名额”表里“公司总量”的上限后，同公司剩余“岗位待筛选”在同一次确认中改为“岗位不符合用户要求”。用户选满之前，任何 Agent 不得因名额剔除岗位。
 - 确认状态时同步写Excel；被占用写不进自动延后。结束前用固定sync-auto，不再询问。
+- 用户状态确认和反向评审回写在交接刷新后调用工作区生产验收入口，通过 `production_acceptance` 返回实际同步结果。轮末 Hook 补偿未完成的同步。
 
 ## 搜索队列
 

@@ -11,7 +11,7 @@
 | `recruiting_company_report` | `report` | 只读：公司汇报——校招主链接、计划数与名称、管培/产培计划、岗位总数及按投递状态计数与列表、用户已选（计入名额）、投递名额与剩余 |
 | `recruiting_status_check` | `check` | 只读：标签、字段、名额表、未确认状态变更、JSON 与 Excel 差异 |
 | `recruiting_status_propose` | `propose` | 只读：生成“当前状态是X，更新状态是Y”（含名额收口行），必须原样给用户看 |
-| `recruiting_status_confirm` | `confirm` | 用户明确确认后执行，用户原话已点明岗位和状态时直接使用；状态确认不再使用预览指纹，记用户原话到确认台账并改主数据 |
+| `recruiting_status_confirm` | `confirm` | 用户原话已点明岗位和状态时展示后直接执行；提交确认台账及主数据，返回 Excel 同步和工作区 `production_acceptance` 结果 |
 | `recruiting_rows_upsert` | `upsert` | 新增岗位行（`{sheet, company, role:'new'}`，分配岗位编码与站点编码；链接已在表里时拒绝并报出已有编码）或按编码改非状态字段；整行过字段门禁；不能改编码列、投递链接、志愿顺序，不能更换已有岗位的链接 |
 | `recruiting_link_exception_preview` | `link-exception --preview` | 只读：官网无独立详情页时，登记或撤销链接例外前生成备注“当前 → 更新”，必须原样给用户看 |
 | `recruiting_link_exception_confirm` | `link-exception --quote` | 用户确认后写固定格式的链接例外备注并记入台账；forward 据此只免“列表页”检查 |

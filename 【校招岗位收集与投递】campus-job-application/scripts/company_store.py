@@ -615,7 +615,8 @@ class Store:
         out['roles'] = left
         self.save_outcomes(out)
         summary = self.refresh_confirmed_statuses(live, done, left, batch_id)
-        return {'batchId': batch_id, 'companies': summary, 'statusChanges': len(items), 'unresolved': sorted(left)}
+        return {'batchId': batch_id, 'companies': summary, 'statusChanges': len(items), 'unresolved': sorted(left),
+                'production_acceptance': S.sync_production_acceptance(self.ctx)}
 
     def refresh_confirmed_statuses(self, codes, done=(), unresolved=None, batch_id=None):
         """从主表更新受影响公司的宽表及本轮执行进度。"""
